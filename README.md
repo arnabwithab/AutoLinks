@@ -9,14 +9,7 @@
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg?logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/chi-v5-00ADD8.svg?logo=go&logoColor=white" alt="chi">
   <img src="https://img.shields.io/badge/Qdrant-1.18+-blue.svg" alt="Qdrant">
-  <img src="https://img.shields.io/badge/GLiNER2-HF%20Space-blue.svg" alt="GLiNER2">
   <img src="https://img.shields.io/badge/React-18.2-blue.svg" alt="React">
-  <a href="https://autolinks-api.onrender.com">
-    <img src="https://img.shields.io/badge/Render-Deployed-success?logo=render" alt="Render Deployment">
-  </a>
-  <a href="https://autolinks.vercel.app">
-    <img src="https://img.shields.io/badge/Vercel-Deployed-black?logo=vercel" alt="Vercel Deployment">
-  </a>
 </p>
 </center>
 
