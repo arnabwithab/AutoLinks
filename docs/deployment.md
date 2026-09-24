@@ -154,14 +154,17 @@ Visit `https://autolinks-api.onrender.com/api/v1/health` — you should receive 
 
 ### 3.6 Keepalive for Cold Starts
 
-The free Render tier spins down after 15 minutes of inactivity. To prevent cold starts:
+The free Render tier spins down after 15 minutes of inactivity. To prevent cold starts (and keep the HF Space awake):
 
 1. Go to [cron-job.org](https://cron-job.org)
 2. Create a free account
-3. Create a new cron job:
-   - **URL**: `https://autolinks-api.onrender.com/api/v1/health`
-   - **Schedule**: Every 10 minutes
-4. This ping will keep the backend warm
+3. Create three cron jobs, each scheduled every 10 minutes:
+   - **Render**: `GET https://autolinks-api.onrender.com/api/v1/health` (timeout 120s)
+   - **HF Space**: `GET https://eros483-autolinks-models.hf.space/` (timeout 120s)
+   - **Qdrant**: `GET https://<qdrant-host>:6333/collections` with header `api-key: <QDRANT_API_KEY>` (timeout 60s)
+4. These pings keep the services warm
+
+> This replaces the old GitHub Actions keepalive workflow (`.github/workflows/keepalive.yml`), which has been deleted.
 
 ---
 

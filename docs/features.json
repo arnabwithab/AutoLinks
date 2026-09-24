@@ -500,24 +500,24 @@
     },
     {
       "id": "F025",
-      "name": "GitHub Actions Keepalive CD",
-      "description": "Scheduled cron job (every 10 min) pinging Render backend API, HF Models Space, and Qdrant Cloud to prevent free-tier sleep.",
+      "name": "External Keepalive (cron-job.org)",
+      "description": "Scheduled cron job (every 10 min) pinging Render backend API, HF Models Space, and Qdrant Cloud to prevent free-tier sleep. Migrated from GitHub Actions to cron-job.org.",
       "status": "completed",
       "priority": "medium",
-      "module": ".github/workflows/keepalive.yml",
+      "module": "cron-job.org (external)",
       "design_doc": "docs/v2.md",
       "tests": {
         "status": "completed",
         "files": [],
-        "notes": "Manually verified via workflow dispatch and curl exit codes."
+        "notes": "Manually verified via cron-job.org run history and curl exit codes."
       },
       "subtasks": [
-        "Create .github/workflows/keepalive.yml with schedule trigger",
-        "Ping Render: curl https://autolinks-api.onrender.com/api/v1/health",
-        "Ping HF Space: curl https://eros483-autolinks-models.hf.space/health",
-        "Ping Qdrant: curl https://<qdrant-host>:6333"
+        "Create 3 cron-job.org jobs with */10 min schedule",
+        "Ping Render: GET https://autolinks.onrender.com/api/v1/health",
+        "Ping HF Space: GET https://eros483-autolinks-models.hf.space/",
+        "Ping Qdrant: GET https://<qdrant-host>:6333/collections with api-key header"
       ],
-      "notes": "Free-tier services sleep after ~15 min of inactivity. Keepalive prevents cold-start penalty on real requests. Uses GitHub Actions free tier (unlimited minutes for public repos).",
+      "notes": "Free-tier services sleep after ~15 min of inactivity. Keepalive prevents cold-start penalty on real requests. External cron is more reliable than GitHub Actions scheduled workflows (which skip inactive repos). Replaces deleted .github/workflows/keepalive.yml.",
       "added": "2026-07-20",
       "completed": "2026-07-20"
     },

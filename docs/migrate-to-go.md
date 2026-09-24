@@ -445,7 +445,7 @@ jobs:
 
 ### 10.5 Keepalive
 
-No changes. `GET /api/v1/health` still responds identically. cron-job.org or GitHub Actions keepalive continues as before.
+No changes. `GET /api/v1/health` still responds identically. cron-job.org keepalive continues as before (GitHub Actions keepalive workflow has been removed).
 
 ---
 

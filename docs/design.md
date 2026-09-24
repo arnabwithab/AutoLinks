@@ -323,8 +323,8 @@ The original backend was Python/FastAPI with Celery workers. The Go rewrite was 
 
 All four services operate on free tiers. Each tier has sleep/spindown behavior that must be worked around:
 
-- **Render web service:** Spins down after 15 minutes of inactivity. A GitHub Actions cron job pings the health endpoint every 10 minutes.
-- **HF Space:** CPU Basic spaces also spin down. The keepalive pings the Space root endpoint.
+- **Render web service:** Spins down after 15 minutes of inactivity. A cron-job.org job pings the health endpoint every 10 minutes.
+- **HF Space:** CPU Basic spaces also spin down. A second cron-job.org job pings the Space root endpoint.
 - **Qdrant Cloud:** Serverless tier doesn't sleep but has rate limits. The Go client uses persistent gRPC connections to minimize connection overhead.
 - **Upstash Redis:** Free tier has a 256MB storage limit and 1000 commands/day. The system uses Redis sparingly: a single key for the link graph, one key per active job (with 7-day TTL), and a single list for the DLQ.
 
