@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import { fetchSitemapStatus, ingestSitemap } from '../services/api'
+import { fetchSitemapStatus, ingestSitemap, fetchJobStatus } from '../services/api'
 
 function SitemapPage() {
   const [sitemapUrl, setSitemapUrl] = useState('')
@@ -12,6 +12,8 @@ function SitemapPage() {
   const [submitError, setSubmitError] = useState('')
   const [submitMessage, setSubmitMessage] = useState('')
   const { getToken } = useAuth()
+  const pollRef = useRef(null)
+  const mountedRef = useRef(true)
 
   const loadStatus = async () => {
     setStatusLoading(true)
@@ -32,7 +34,39 @@ function SitemapPage() {
 
   useEffect(() => {
     loadStatus()
+    return () => {
+      mountedRef.current = false
+      if (pollRef.current) clearTimeout(pollRef.current)
+    }
   }, [])
+
+  const pollJob = (jobId) => {
+    pollRef.current = setTimeout(async () => {
+      try {
+        const job = await fetchJobStatus(jobId, getToken)
+        if (!mountedRef.current) return
+
+        if (job.status === 'done' || job.status === 'failed') {
+          setSubmitMessage(
+            job.status === 'done'
+              ? `Crawl complete. Indexed ${job.articlesDone} of ${job.total} pages.`
+              : `Crawl failed after ${job.articlesDone} of ${job.total} pages.`,
+          )
+          if (job.errors?.length) setSubmitError(job.errors.join('; '))
+          setSubmitting(false)
+          await loadStatus()
+          return
+        }
+
+        setSubmitMessage(`Crawling... ${job.progressPct}% (${job.articlesDone}/${job.total})`)
+        pollJob(jobId)
+      } catch (err) {
+        if (!mountedRef.current) return
+        setSubmitError(err.message)
+        setSubmitting(false)
+      }
+    }, 2000)
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -44,15 +78,20 @@ function SitemapPage() {
 
     setSubmitting(true)
     setSubmitError('')
-    setSubmitMessage('')
+    setSubmitMessage('Starting crawl...')
 
     try {
       const result = await ingestSitemap(sitemapUrl.trim(), 5, getToken)
-      setSubmitMessage(`Crawl started successfully. Indexed ${result.chunksIngested} pages from the sitemap.`)
-      await loadStatus()
+      if (!result.jobId) {
+        setSubmitMessage('Crawl queued.')
+        setSubmitting(false)
+        await loadStatus()
+        return
+      }
+      setSubmitMessage('Crawl queued. Waiting for progress...')
+      pollJob(result.jobId)
     } catch (err) {
       setSubmitError(err.message)
-    } finally {
       setSubmitting(false)
     }
   }

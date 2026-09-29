@@ -23,7 +23,6 @@ function Header({ currentView, onNavigate }) {
           </button>
         ))}
       </nav>
-      <span className="al-tagline">Arnab</span>
       <div className="al-user">
         <UserButton
           afterSignOutUrl="/"

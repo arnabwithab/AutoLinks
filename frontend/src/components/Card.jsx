@@ -31,7 +31,7 @@ function Card({ recommendation, index }) {
       <div className="al-card-phrase">{recommendation.exact_phrase}</div>
       <div className="al-card-context">{recommendation.context_snippet}</div>
       <a
-        href={recommendation.suggested_url}
+        href={safeHref(recommendation.suggested_url)}
         className="al-card-url"
         target="_blank"
         rel="noopener noreferrer"
@@ -42,15 +42,27 @@ function Card({ recommendation, index }) {
       <div className="al-card-scores">
         <span className="al-card-score">
           <span className="label">Match:</span>
-          <span className="value">{recommendation.similarity_score.toFixed(2)}</span>
+          <span className="value">{Number(recommendation.similarity_score ?? 0).toFixed(2)}</span>
         </span>
         <span className="al-card-score equity">
           <span className="label">Equity:</span>
-          <span className="value">{recommendation.equity_need_score.toFixed(2)}</span>
+          <span className="value">{Number(recommendation.equity_need_score ?? 0).toFixed(2)}</span>
         </span>
       </div>
     </div>
   )
+}
+
+function safeHref(url) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.href
+    }
+  } catch {
+    // fall through
+  }
+  return '#'
 }
 
 function truncateUrl(url) {

@@ -1,21 +1,32 @@
 export function buildHighlightedHtml(draftText, recommendations) {
-  if (!recommendations.length) {
-    return escapeHtml(draftText)
+  const escaped = escapeHtml(draftText)
+  if (!recommendations?.length) {
+    return escaped
   }
 
-  const uniquePhrases = [...new Set(recommendations.map((item) => item.exact_phrase))]
-  let result = escapeHtml(draftText)
+  const phrases = [...new Set(recommendations.map((item) => item.exact_phrase).filter(Boolean))]
+  if (!phrases.length) {
+    return escaped
+  }
 
-  uniquePhrases.forEach((phrase) => {
-    const phraseKey = encodePhraseKey(phrase)
-    const regex = new RegExp(`(${escapeRegex(phrase)})`, 'gi')
-    result = result.replace(
-      regex,
-      `<mark class="hl" data-phrase-key="${phraseKey}">$1</mark>`,
-    )
+  const keyByEscapedLower = new Map()
+  phrases.forEach((phrase) => {
+    keyByEscapedLower.set(escapeHtml(phrase).toLowerCase(), encodePhraseKey(phrase))
   })
 
-  return result
+  const pattern = phrases
+    .map((phrase) => escapeRegex(escapeHtml(phrase)))
+    .sort((a, b) => b.length - a.length)
+    .join('|')
+  const regex = new RegExp(`(${pattern})`, 'gi')
+
+  return escaped.replace(regex, (match) => {
+    const phraseKey = keyByEscapedLower.get(match.toLowerCase())
+    if (!phraseKey) {
+      return match
+    }
+    return `<mark class="hl" data-phrase-key="${phraseKey}">${match}</mark>`
+  })
 }
 
 export function encodePhraseKey(phrase) {

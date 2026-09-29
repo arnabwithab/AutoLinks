@@ -17,6 +17,26 @@ describe('buildHighlightedHtml', () => {
 
     expect(html).toBe('&lt;script&gt;alert(1)&lt;/script&gt;')
   })
+
+  it('highlights phrases containing special characters', () => {
+    const html = buildHighlightedHtml('We use AT&T and C++ daily.', [
+      { exact_phrase: 'AT&T' },
+      { exact_phrase: 'C++' },
+    ])
+
+    expect(html).toContain('<mark class="hl" data-phrase-key="AT%26T">AT&amp;T</mark>')
+    expect(html).toContain('C++</mark>')
+  })
+
+  it('does not inject markup inside already-highlighted segments', () => {
+    const html = buildHighlightedHtml('mark the mark', [
+      { exact_phrase: 'mark' },
+      { exact_phrase: 'class' },
+    ])
+
+    expect(html.match(/<mark/g)).toHaveLength(2)
+    expect(html).not.toContain('class="hl" data-phrase-key="class"')
+  })
 })
 
 describe('encodePhraseKey', () => {

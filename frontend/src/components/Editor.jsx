@@ -8,6 +8,7 @@ function Editor() {
   const [showHighlight, setShowHighlight] = useState(false)
   const textareaRef = useRef(null)
   const highlightRef = useRef(null)
+  const requestIdRef = useRef(0)
   const { getToken } = useAuth()
   const {
     draftText,
@@ -22,20 +23,28 @@ function Editor() {
 
   const handleAnalyze = async () => {
     if (!draftText.trim()) return
+    const requestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
     try {
       const result = await fetchRecommendations(draftText, 0.7, 0.65, getToken)
+      if (requestId !== requestIdRef.current) return
       setRecommendations(result.recommendations, result.latency)
       setShowHighlight(true)
     } catch (err) {
+      if (requestId !== requestIdRef.current) return
       setError(err.message)
       setLoading(false)
     }
   }
 
   const handleTextChange = (e) => {
+    requestIdRef.current += 1
     setDraftText(e.target.value)
+    setShowHighlight(false)
+  }
+
+  const handleEdit = () => {
     setShowHighlight(false)
   }
 
@@ -107,6 +116,11 @@ function Editor() {
           'Analyze'
         )}
       </button>
+      {showHighlight && (
+        <button className="al-edit-toggle" type="button" onClick={handleEdit}>
+          Back to editing
+        </button>
+      )}
     </div>
   )
 }
