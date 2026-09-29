@@ -130,9 +130,8 @@ func GetJob(jobID string) (*Job, error) {
 	return &job, nil
 }
 
-// UpdateJob updates fields on a job. It is a read-modify-write, not atomic —
-// safe only while a single worker owns a given job. Use WATCH/Lua if a second
-// writer is ever introduced.
+// UpdateJob atomically merges fields into a job via WATCH optimistic locking.
+// Safe with multiple writers (API + workers); retries on contention.
 func UpdateJob(jobID string, updates map[string]interface{}) error {
 	rds := getRedis()
 	if rds == nil {
@@ -141,31 +140,90 @@ func UpdateJob(jobID string, updates map[string]interface{}) error {
 
 	ctx := context.Background()
 	key := fmt.Sprintf("%s:%s", jobNamespace, jobID)
-	raw, err := rds.Get(ctx, key).Result()
-	if err != nil {
-		return fmt.Errorf("failed to get job for update: %w", err)
+
+	for attempt := 0; attempt < 20; attempt++ {
+		err := rds.Watch(ctx, func(tx *redis.Tx) error {
+			raw, err := tx.Get(ctx, key).Result()
+			if err != nil {
+				return err
+			}
+
+			var job map[string]interface{}
+			if err := json.Unmarshal([]byte(raw), &job); err != nil {
+				return fmt.Errorf("failed to unmarshal job: %w", err)
+			}
+
+			for k, v := range updates {
+				job[k] = v
+			}
+			job["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+
+			data, err := json.Marshal(job)
+			if err != nil {
+				return fmt.Errorf("failed to marshal job: %w", err)
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				return pipe.Set(ctx, key, data, time.Duration(jobTTL)*time.Second).Err()
+			})
+			return err
+		}, key)
+
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, redis.TxFailedErr) {
+			time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+			continue
+		}
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+	return fmt.Errorf("failed to update job: too much contention on %s", jobID)
+}
+
+// IncrementProgress atomically adds delta to articles_done (§2 progress writes).
+// Re-running a crawl sets the same number twice — idempotent.
+func IncrementProgress(jobID string, delta int) error {
+	rds := getRedis()
+	if rds == nil {
+		return ErrNotConfigured
 	}
 
-	var job map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &job); err != nil {
-		return fmt.Errorf("failed to unmarshal job: %w", err)
-	}
+	ctx := context.Background()
+	key := fmt.Sprintf("%s:%s", jobNamespace, jobID)
 
-	for k, v := range updates {
-		job[k] = v
-	}
-	job["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	for attempt := 0; attempt < 20; attempt++ {
+		err := rds.Watch(ctx, func(tx *redis.Tx) error {
+			raw, err := tx.Get(ctx, key).Result()
+			if err != nil {
+				return err
+			}
+			var job Job
+			if err := json.Unmarshal([]byte(raw), &job); err != nil {
+				return err
+			}
+			job.ArticlesDone += delta
+			job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			data, err := json.Marshal(job)
+			if err != nil {
+				return err
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				return pipe.Set(ctx, key, data, time.Duration(jobTTL)*time.Second).Err()
+			})
+			return err
+		}, key)
 
-	data, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("failed to marshal job: %w", err)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, redis.TxFailedErr) {
+			time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+			continue
+		}
+		return fmt.Errorf("failed to increment progress: %w", err)
 	}
-
-	if err := rds.Set(ctx, key, data, time.Duration(jobTTL)*time.Second).Err(); err != nil {
-		return fmt.Errorf("failed to save job: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("failed to increment progress: too much contention on %s", jobID)
 }
 
 // PendingJobs returns jobs left in a non-terminal state (queued, processing, retrying).
@@ -217,7 +275,7 @@ func Health(ctx context.Context) error {
 	return rds.Ping(ctx).Err()
 }
 
-// AddJobError appends an error to a job's error list.
+// AddJobError atomically appends an error to a job's error list.
 func AddJobError(jobID string, errorMsg string) error {
 	rds := getRedis()
 	if rds == nil {
@@ -226,29 +284,43 @@ func AddJobError(jobID string, errorMsg string) error {
 
 	ctx := context.Background()
 	key := fmt.Sprintf("%s:%s", jobNamespace, jobID)
-	raw, err := rds.Get(ctx, key).Result()
-	if err != nil {
-		return fmt.Errorf("failed to get job: %w", err)
+
+	for attempt := 0; attempt < 20; attempt++ {
+		err := rds.Watch(ctx, func(tx *redis.Tx) error {
+			raw, err := tx.Get(ctx, key).Result()
+			if err != nil {
+				return err
+			}
+
+			var job map[string]interface{}
+			if err := json.Unmarshal([]byte(raw), &job); err != nil {
+				return fmt.Errorf("failed to unmarshal job: %w", err)
+			}
+
+			errs, _ := job["errors"].([]interface{})
+			errs = append(errs, errorMsg)
+			job["errors"] = errs
+			job["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+
+			data, err := json.Marshal(job)
+			if err != nil {
+				return fmt.Errorf("failed to marshal job: %w", err)
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				return pipe.Set(ctx, key, data, time.Duration(jobTTL)*time.Second).Err()
+			})
+			return err
+		}, key)
+
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, redis.TxFailedErr) {
+			time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+			continue
+		}
+		return fmt.Errorf("failed to add job error: %w", err)
 	}
-
-	var job map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &job); err != nil {
-		return fmt.Errorf("failed to unmarshal job: %w", err)
-	}
-
-	errors, _ := job["errors"].([]interface{})
-	errors = append(errors, errorMsg)
-	job["errors"] = errors
-	job["updated_at"] = time.Now().UTC().Format(time.RFC3339)
-
-	data, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("failed to marshal job: %w", err)
-	}
-
-	if err := rds.Set(ctx, key, data, time.Duration(jobTTL)*time.Second).Err(); err != nil {
-		return fmt.Errorf("failed to save job: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("failed to add job error: too much contention on %s", jobID)
 }
