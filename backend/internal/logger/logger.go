@@ -2,12 +2,16 @@
 package logger
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/arnabwithab/AutoLinks/backend/internal/trace"
 )
 
 var (
@@ -31,11 +35,44 @@ func init() {
 }
 
 func logf(level, format string, args ...interface{}) {
+	logWithTrace("", level, format, args...)
+}
+
+// logWithTrace writes to the legacy log file and to stdout as JSON for CloudWatch.
+func logWithTrace(traceID, level, format string, args ...interface{}) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	msg := fmt.Sprintf(format, args...)
-	l.Printf("%s-%s-%s", time.Now().Format("2006-01-02 15:04:05"), level, msg)
+	now := time.Now()
+	l.Printf("%s-%s-%s", now.Format("2006-01-02 15:04:05"), level, msg)
+
+	entry := map[string]string{
+		"time":  now.UTC().Format(time.RFC3339Nano),
+		"level": level,
+		"msg":   msg,
+	}
+	if traceID != "" {
+		entry["trace_id"] = traceID
+	}
+	if data, err := json.Marshal(entry); err == nil {
+		fmt.Fprintln(os.Stdout, string(data))
+	}
+}
+
+// InfoCtx logs with the trace ID from ctx when present.
+func InfoCtx(ctx context.Context, format string, args ...interface{}) {
+	logWithTrace(trace.FromContext(ctx), "INFO", format, args...)
+}
+
+// WarningCtx logs with the trace ID from ctx when present.
+func WarningCtx(ctx context.Context, format string, args ...interface{}) {
+	logWithTrace(trace.FromContext(ctx), "WARNING", format, args...)
+}
+
+// ErrorCtx logs with the trace ID from ctx when present.
+func ErrorCtx(ctx context.Context, format string, args ...interface{}) {
+	logWithTrace(trace.FromContext(ctx), "ERROR", format, args...)
 }
 
 // Info logs an informational message.

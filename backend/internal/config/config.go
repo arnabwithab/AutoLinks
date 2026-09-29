@@ -84,4 +84,8 @@ var (
 	AllowPrivateFetch = func() bool { return GetBool("ALLOW_PRIVATE_FETCH") }
 	FrontendURL       = func() string { return Get("FRONTEND_URL", "http://localhost:3000,https://autolinks.vercel.app") }
 	Port              = func() string { return Get("PORT", "8000") }
+	// ponytail: distributed rollout flags; SageMaker stub until endpoint is provisioned.
+	ModelsBackend     = func() string { return Get("MODELS_BACKEND", "hf") }
+	SageMakerEndpoint = func() string { return Get("SAGEMAKER_ENDPOINT", "") }
+	ServiceRole       = func() string { return Get("SERVICE_ROLE", "all") }
 )

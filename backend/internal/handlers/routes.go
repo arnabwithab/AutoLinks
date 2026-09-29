@@ -25,6 +25,7 @@ import (
 	"github.com/arnabwithab/AutoLinks/backend/internal/qdrant"
 	"github.com/arnabwithab/AutoLinks/backend/internal/rerank"
 	"github.com/arnabwithab/AutoLinks/backend/internal/search"
+	"github.com/arnabwithab/AutoLinks/backend/internal/trace"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -53,6 +54,7 @@ func NewRouter(tokenVerifier auth.TokenVerifier) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(trace.Middleware)
 	r.Use(requestBodyLimiter(maxRequestBodyBytes))
 	r.Use(rateLimitMiddleware(rateLimitPerMinute, time.Minute))
 	r.Use(cors.Handler(cors.Options{
