@@ -235,7 +235,7 @@ Card anatomy (top to bottom):
 ### Entity Highlight (in editor)
 
 ```html
-<mark class="hl" data-phrase="...">phrase</mark>
+<mark class="hl" data-phrase-key="...">phrase</mark>
 ```
 
 ```

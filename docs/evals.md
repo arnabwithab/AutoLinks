@@ -2,11 +2,16 @@
 
 Last run: 2026-07-21
 
+> Honesty note: only Eval 1 (latency) and the throughput eval have published
+> results. Eval 2 (LLM-judge precision) and Eval 4 (link-equity/Gini) target
+> >90% YES and orphan reduction respectively, but **no results have been
+> recorded** — treat those numbers as unverified until this file contains them.
+
 ## Eval 1: Latency (Recommend)
 
 **Target**: < 3000ms max — **PASS**
 
-| Metric | Old (HF Space, sequential) | New (Local GLiNER2, batched + parallel) |
+| Metric | Old (HF Space, sequential) | New (HF Space, batched + parallel) |
 |--------|---------------------------|----------------------------------------|
 | Mean | ~16,000ms | **608ms** |
 | Median (P50) | — | **525ms** |
@@ -20,7 +25,7 @@ Last run: 2026-07-21
 1. **Batch embeddings** — all entity queries sent in one `EmbedBatch` call (vs N sequential `EmbedText`)
 2. **Parallel Qdrant search** — goroutine per entity for `SearchSimilar` + `RerankCandidates`
 3. **HF Space inference** — `gliner2-base-v1` (205M) + `all-MiniLM-L6-v2` served via HF Space (`eros483/autolinks-models`), bypassing local CPU constraints
-4. **Concurrent sitemap fetches** — `semaphore.Weighted(5)` in worker pool `processJob` for 5x ingest speed
+4. **Concurrent sitemap fetches** — bounded worker goroutines (`max_concurrent`) in the worker pool
 
 ### Model used
 - GLiNER2: `fastino/gliner2-base-v1` (205M params) served via HF Space Gradio API
@@ -52,11 +57,11 @@ Last run: 2026-07-21
 | Articles | 202 |
 | Duration | 82.0s |
 | Average throughput | 2.46 articles/sec |
-| Concurrent fetches | 5 (semaphore-bounded goroutines) |
+| Concurrent fetches | 5 (bounded worker goroutines) |
 | Status | Marginal (within <2% of target) |
 
 ### Notes
-- Worker pool uses `semaphore.Weighted(5)` for concurrent HTTP fetches
+- Worker pool fans out per-URL fetches across a bounded set of goroutines (`max_concurrent`, default 5)
 - Each article: HTTP fetch → HTML extraction → chunk → embed (MiniLM local) → Qdrant upsert
 - Bottleneck: Qdrant Cloud upserts + MiniLM embedding (CPU-bound)
 - Per-article progress tracking disabled during concurrent batch (batched status update at end)

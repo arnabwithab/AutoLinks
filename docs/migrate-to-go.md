@@ -1,5 +1,7 @@
 # AutoLinks Backend Migration: Python → Go
 
+> **HISTORICAL / PARTIALLY BUILT.** The migration shipped, but two proposals here were not implemented as written: (1) content extraction uses a built-in regex HTML stripper, **not** `go-trafilatura`/`goquery` (neither is a dependency), and (2) the worker pool is a fixed in-process goroutine pool, not a scaled/background worker. See `docs/design.md` for current state.
+
 > A comprehensive plan for migrating the AutoLinks backend from Python/FastAPI to Go/chi with an in-process goroutine worker pool.
 
 ---

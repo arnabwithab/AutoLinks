@@ -70,14 +70,14 @@ go mod tidy
 
 ### 2.2 Dockerfile
 
-Create `backend/Dockerfile`:
+The Dockerfile lives at `backend/Dockerfile` but is built from the **repository root** as the build context (it copies `backend/...`):
 
 ```dockerfile
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
-COPY . .
+COPY backend/ ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /server ./cmd/server
 
 FROM alpine:3.21
@@ -89,21 +89,7 @@ CMD ["/server"]
 
 ### 2.3 .dockerignore
 
-Create `backend/.dockerignore`:
-
-```
-*.go~
-*.test
-*.out
-.env
-.env.example
-logs/
-*.log
-.git
-.gitignore
-*.md
-eval/
-```
+The root `.dockerignore` applies (the build context is the repo root); it excludes `.env`, `logs/`, `node_modules/`, and `dist/`.
 
 ---
 
@@ -123,24 +109,30 @@ eval/
    - **Name**: `autolinks-api`
    - **Region**: Select a region (e.g., Oregon - US West)
    - **Branch**: `main`
-   - **Build Command**: Leave empty (Render auto-detects Dockerfile)
+   - **Dockerfile Path**: `backend/Dockerfile` (build context is the repo root)
+   - **Build Command**: Leave empty (Render builds the Dockerfile)
    - **Start Command**: Leave empty (already configured in Dockerfile)
 
 ### 3.3 Set Environment Variables
 
 In the Render dashboard, add the following environment variables under **Environment Variables**:
 
-| Variable | Value |
-|----------|-------|
-| `MODELS_SPACE_URL` | `https://eros483-autolinks-models.hf.space` |
-| `HF_TOKEN` | Your Hugging Face access token |
-| `QDRANT_URL` | Your Qdrant cloud endpoint with gRPC port (e.g., `https://xxxx.us-west-1-0.aws.cloud.qdrant.io:6334`) |
-| `QDRANT_API_KEY` | Your Qdrant API key |
-| `REDIS_URL` | Upstash Redis connection string (`rediss://default:<token>@<host>:6379`) |
-| `GROQ_API_KEY` | Your Groq API key (for evaluation) |
-| `DRY_RUN` | `false` (set to `true` to test without external API calls) |
-| `DEBUG` | `false` |
-| `RERANK_ALPHA` | `0.7` |
+| Variable | Required | Value |
+|----------|----------|-------|
+| `MODELS_SPACE_URL` | yes | `https://eros483-autolinks-models.hf.space` |
+| `HF_TOKEN` | yes | Your Hugging Face access token |
+| `QDRANT_URL` | yes | Qdrant cloud endpoint with gRPC port (e.g., `https://xxxx.us-west-1-0.aws.cloud.qdrant.io:6334`) |
+| `QDRANT_API_KEY` | yes | Your Qdrant API key |
+| `QDRANT_COLLECTION` | no | `articles` |
+| `REDIS_URL` | yes | Upstash Redis connection string (`rediss://default:<token>@<host>:6379`) |
+| `CLERK_SECRET_KEY` | yes | Clerk secret key — **the server refuses to boot without it** |
+| `FRONTEND_URL` | yes | Comma-separated allowed origins, e.g. `https://autolinks.vercel.app` |
+| `GROQ_API_KEY` | no | Groq API key (for the precision eval) |
+| `DRY_RUN` | no | `false` (set to `true` to test without external API calls) |
+| `DEBUG` | no | `false` |
+| `RERANK_ALPHA` | no | `0.7` |
+
+> Auth is fail-closed: if `CLERK_SECRET_KEY` is unset the process exits unless `AUTH_DISABLED=true` is explicitly set. Never set `AUTH_DISABLED=true` in production.
 
 ### 3.4 Deploy
 
@@ -180,10 +172,11 @@ VITE_API_BASE_URL=https://autolinks-api.onrender.com/api/v1
 
 ### 4.2 Create .env for Frontend Deployment
 
-Create or update `frontend/.env.production` (or configure via Vercel dashboard):
+Create or update `frontend/.env.production` (or configure via Vercel dashboard). Both values are required — the app throws on startup without the Clerk key:
 
 ```bash
 VITE_API_BASE_URL=https://autolinks-api.onrender.com/api/v1
+VITE_CLERK_PUBLISHABLE_KEY=pk_live_xxxxxxxxxxxx
 ```
 
 ---
@@ -208,6 +201,7 @@ In Vercel project settings, add:
 | Variable | Value |
 |----------|-------|
 | `VITE_API_BASE_URL` | `https://autolinks-api.onrender.com/api/v1` |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Your Clerk publishable key (`pk_live_...`) |
 
 ### 5.3 Deploy
 
@@ -224,6 +218,7 @@ In Vercel project settings, add:
 ```bash
 curl -X POST https://autolinks-api.onrender.com/api/v1/recommend \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <clerk_session_token>" \
   -d '{"text": "Deep learning has revolutionized CUDA optimization in modern GPUs."}'
 ```
 
@@ -237,19 +232,21 @@ Expected response:
 }
 ```
 
+> All routes except `/health` require a Clerk session token. Omit the header and you get `401`.
+
 ### 6.2 Test Backend Health Endpoint
 
 ```bash
 curl https://autolinks-api.onrender.com/api/v1/health
 ```
 
-Expected response: `{"status": "healthy"}` or similar
+Expected response shape: `{"status":"ok","qdrant":"ok","redis":"ok","models":"configured"}`. `status` becomes `degraded` if Qdrant or Redis is unreachable.
 
 ### 6.3 Test Frontend
 
 1. Open `https://autolinks.vercel.app` in a browser
-2. Enter some text in the editor
-3. Click **Get Recommendations**
+2. Sign in, go to **Workspace**, enter some text in the editor
+3. Click **Analyze**
 4. Verify that recommendations appear with suggested URLs
 
 ### 6.4 Test Sitemap Ingestion
@@ -257,10 +254,11 @@ Expected response: `{"status": "healthy"}` or similar
 ```bash
 curl -X POST https://autolinks-api.onrender.com/api/v1/ingest/sitemap \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <clerk_session_token>" \
   -d '{"sitemap_url": "https://waitbutwhy.com/post-sitemap.xml"}'
 ```
 
-Note: This may take a few minutes for 150+ articles
+This returns a `job_id` immediately; poll `/api/v1/ingest/status/{job_id}` for progress.
 
 ---
 
@@ -294,9 +292,14 @@ After deployment, update `README.md` to reflect production URLs:
 |----------|-------------|---------|
 | `MODELS_SPACE_URL` | HF Space for GLiNER2 + MiniLM | `https://eros483-autolinks-models.hf.space` |
 | `HF_TOKEN` | Hugging Face access token | `hf_xxxx...` |
-| `QDRANT_URL` | Qdrant Cloud endpoint | `https://xxxx.us-west-1-0.aws.cloud.qdrant.io` |
+| `QDRANT_URL` | Qdrant Cloud endpoint | `https://xxxx.us-west-1-0.aws.cloud.qdrant.io:6334` |
 | `QDRANT_API_KEY` | Qdrant API key | `xxxxx...` |
+| `QDRANT_COLLECTION` | Collection name | `articles` |
 | `REDIS_URL` | Upstash Redis for job queue | `rediss://default:xxx@host:6379` |
+| `CLERK_SECRET_KEY` | Clerk secret key (required) | `sk_live_xxxx...` |
+| `FRONTEND_URL` | Comma-separated CORS origins | `https://autolinks.vercel.app` |
+| `AUTH_DISABLED` | Explicit opt-out of auth (never in prod) | `false` |
+| `ALLOW_PRIVATE_FETCH` | Allow crawling localhost/private hosts (dev only) | `false` |
 | `GROQ_API_KEY` | Groq LLM judge API key | `gsk_xxxx...` |
 | `DRY_RUN` | Skip external API calls (for testing) | `false` |
 | `DEBUG` | Enable debug logging | `false` |
@@ -307,6 +310,7 @@ After deployment, update `README.md` to reflect production URLs:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `VITE_API_BASE_URL` | Backend API URL | `https://autolinks-api.onrender.com/api/v1` |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (required) | `pk_live_xxxx...` |
 
 ---
 
@@ -315,14 +319,17 @@ After deployment, update `README.md` to reflect production URLs:
 ### Backend
 
 - **500 errors**: Check Render logs in the dashboard
+- **Server exits immediately on boot**: `CLERK_SECRET_KEY` is unset. Set it, or set `AUTH_DISABLED=true` for a local throwaway.
 - **Qdrant connection errors**: Verify `QDRANT_URL` and `QDRANT_API_KEY` are correct
 - **Cold start delays**: Use cron-job.org to ping every 10 minutes
 - **Ingestion jobs stuck**: Verify `REDIS_URL` is set and Upstash Redis is running; check worker pool logs for failed jobs
+- **SSRF errors during crawl** (`refusing to connect to non-public address`): the target resolved to a private IP. Set `ALLOW_PRIVATE_FETCH=true` only for intentional local crawling.
 - **HF Space errors**: Verify `HF_TOKEN` is valid and `MODELS_SPACE_URL` is correct
 
 ### Frontend
 
-- **CORS errors**: Ensure backend CORS allows your Vercel domain
+- **CORS errors**: set backend `FRONTEND_URL` to your exact Vercel origin (comma-separate multiple origins)
+- **Blank page after deploy**: `VITE_CLERK_PUBLISHABLE_KEY` is missing; the app throws on startup without it
 - **API not reachable**: Verify `VITE_API_BASE_URL` matches your Render URL
 
 ### General

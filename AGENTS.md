@@ -11,7 +11,7 @@ AutoLinks is a semantic internal-link generation tool for SEO teams and content 
 - State Management: Zustand
 - NER: GLiNER2 via HuggingFace Space (eros483/autolinks-models)
 - Embeddings: all-MiniLM-L6-v2 (384-dim, via HF Space)
-- Content Extraction: go-trafilatura + goquery
+- Content Extraction: built-in HTML stripping (regex) with internal-link extraction
 - Evaluation Judge: Groq LLM (llama-3.3-70b-versatile)
 
 ## Key Commands
@@ -88,12 +88,15 @@ AutoLinks/
 │   │   │   └── rerank.go        # equity-aware re-ranking + link graph (Redis)
 │   │   ├── ingest/
 │   │   │   ├── chunk.go         # text chunking (sliding window)
-│   │   │   ├── crawl.go         # sitemap crawl + go-trafilatura extraction
+│   │   │   ├── crawl.go         # sitemap crawl + built-in text extraction
+│   │   │   ├── fetch.go         # SSRF-hardened outbound HTTP client
 │   │   │   └── linkgraph.go     # link graph building from internal links
 │   │   ├── jobs/
 │   │   │   ├── manager.go       # Redis-backed job lifecycle (create/get/update/errors)
-│   │   │   ├── worker.go        # 4-goroutine pool, bounded semaphore, retry+backoff
+│   │   │   ├── worker.go        # 4-goroutine pool, bounded per-URL workers, retry+backoff
 │   │   │   └── dlq.go           # dead letter queue (Redis list: dlq:ingest)
+│   │   ├── auth/
+│   │   │   └── middleware.go    # Clerk JWT auth middleware (fail-closed)
 │   │   ├── handlers/
 │   │   │   └── routes.go        # all 8 API endpoints (thin layer on core/)
 │   │   └── models/
@@ -103,11 +106,13 @@ AutoLinks/
 │   │   │   └── main.go          # Eval 1: round-trip latency measurement (target <3s)
 │   │   ├── precision/
 │   │   │   └── main.go          # Eval 2: LLM-as-a-judge semantic accuracy (target >90% YES)
-│   │   └── equity/
-│   │       └── main.go          # Eval 4: link equity distribution (Gini + orphan reduction)
+│   │   ├── equity/
+│   │   │   └── main.go          # Eval 4: link equity distribution (Gini + orphan reduction)
+│   │   └── throughput/
+│   │       └── main.go          # Sitemap ingest throughput (target >2.5 articles/sec)
 │   ├── go.mod
 │   ├── go.sum
-│   └── Dockerfile                # multi-stage build (golang:1.23 → alpine:3.21)
+│   └── Dockerfile                # multi-stage build (golang:1.25 → alpine:3.21)
 │
 ├── docs/
 │   ├── features.json            # canonical feature tracker — always kept up to date
@@ -335,7 +340,7 @@ The Reviewer must approve before any task is considered done.
 ### Known Gotchas
 - The `internal/` directory enforces Go's visibility rules — packages under `internal/` cannot be imported by modules outside this repo. This is by design.
 - HF Space SSE polling uses `net/http` with the same "event: complete" / "event: error" protocol as the Python backend. The Gradio API call/poll cycle is identical.
-- Sitemap ingestion for large corpora (150+ articles) uses a semaphore-based bounded concurrency (`max_concurrent=5`) to avoid rate-limiting the source server.
+- Sitemap ingestion for large corpora (150+ articles) fans URLs out to a bounded set of worker goroutines sized by `max_concurrent` (default 5, clamped to 20) to avoid rate-limiting the source server.
 - The equity eval can run in synthetic mode (`--mode synthetic`) without a live API — useful for CI/testing.
 - Render free tier has a 512MB RAM limit. With no local model loaded (all inference via HF Space), the Go binary uses ~25MB RAM at runtime — well within the limit.
 - Qdrant Cloud uses gRPC on port 6334. When running Qdrant locally for development, ensure both ports 6333 (HTTP) and 6334 (gRPC) are exposed: `docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant`.

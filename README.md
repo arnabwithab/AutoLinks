@@ -2,18 +2,16 @@
 
 # AutoLinks
 
-</center>
-
-<center>
 <p>
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg?logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/chi-v5-00ADD8.svg?logo=go&logoColor=white" alt="chi">
   <img src="https://img.shields.io/badge/Qdrant-1.18+-blue.svg" alt="Qdrant">
   <img src="https://img.shields.io/badge/React-18.2-blue.svg" alt="React">
 </p>
-</center>
 
 <p>A semantic internal link generation API that analyzes draft text, extracts named entities using GLiNER, finds semantically similar articles via Qdrant vector search, and returns high-confidence internal linking recommendations with equity-aware re-ranking.</p>
+
+</div>
 
 ---
 <div align="left">
@@ -48,7 +46,7 @@ make deploy-inference
 
 Post deployment, add HF space URL to .env
 
-### 4. Run
+### 3. Run
 
 ```bash
 make run             # starts qdrant, backend (:8000), and frontend (:3000)
@@ -76,7 +74,7 @@ For the full command reference (coverage, benchmarks, eval tests, tidy, etc.), s
 - Architecture Decisions: [docs/design.md](docs/design.md)
 - Deployment strategies: [docs/deployment.md](docs/deployment.md)
 - Full API usage, request examples, and response shapes: [docs/api.md](docs/api.md)
-- AI Evals: [docs/design.md](docs/design.md)
+- AI Evals: [docs/evals.md](docs/evals.md)
 
 ---
 
@@ -88,11 +86,19 @@ For the full command reference (coverage, benchmarks, eval tests, tidy, etc.), s
 | `HF_TOKEN` | Hugging Face access token | - |
 | `QDRANT_API_KEY` | Optional Qdrant API key for hosted deployments | - |
 | `QDRANT_URL` | Qdrant endpoint (HTTP for local, HTTPS for cloud) | `http://localhost:6334` |
+| `QDRANT_COLLECTION` | Qdrant collection name | `articles` |
 | `REDIS_URL` | Redis for job queue and link graph | - |
+| `CLERK_SECRET_KEY` | Clerk secret key (server refuses to boot without it) | - |
+| `FRONTEND_URL` | Comma-separated CORS origins | `http://localhost:3000` |
+| `AUTH_DISABLED` | Explicit opt-out of auth (never in prod) | `false` |
+| `ALLOW_PRIVATE_FETCH` | Allow crawling private/localhost hosts (dev only) | `false` |
 | `GROQ_API_KEY` | Groq LLM for precision eval | - |
 | `DRY_RUN` | Skip HF Space calls, use fixtures | `false` |
 | `DEBUG` | Enable debug mode | `false` |
 | `RERANK_ALPHA` | Similarity weight for re-ranking | `0.7` |
+| `PORT` | HTTP listen port | `8000` |
+| `VITE_API_BASE_URL` | Frontend → backend API base URL | `http://127.0.0.1:8000/api/v1` |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (frontend fails to boot without it) | - |
 
 ---
 

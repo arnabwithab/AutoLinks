@@ -48,7 +48,7 @@ Successful recommendation responses return:
 
 Validation errors usually return HTTP `400`.
 
-Application errors usually return HTTP `500` with a `detail` field.
+Application errors usually return HTTP `500` with a `detail` field. Dependency failures return `502`/`503` (e.g. embedding service or job store unavailable), and rate-limited requests return `429`.
 
 ---
 
@@ -71,8 +71,12 @@ Analyze draft text and return internal link recommendations.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `text` | string | yes | Draft text to analyze |
-| `alpha` | float | no | Similarity weight in the equity-aware rerank formula |
-| `min_similarity` | float | no | Minimum vector similarity score required before a candidate is surfaced |
+| `alpha` | float | no | Similarity weight in the equity-aware rerank formula, `0`–`1` (omit for default `0.7`). `0` is valid and means pure-equity ranking |
+| `min_similarity` | float | no | Minimum vector similarity score required before a candidate is surfaced, `0`–`1` (omit for default `0.65`). `0` is valid |
+
+### Notes
+
+- `alpha` and `min_similarity` are optional; an explicit `0` is honored, only omission falls back to the default. Values outside `0`–`1` return `400`.
 
 ### Example cURL
 
@@ -171,8 +175,8 @@ Crawl a sitemap, extract article content, build the internal link graph, and ing
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `sitemap_url` | string | yes | Sitemap to crawl |
-| `max_concurrent` | integer | no | Max concurrent fetches during crawl |
+| `sitemap_url` | string | yes | Sitemap to crawl (must be an http/https URL) |
+| `max_concurrent` | integer | no | Max concurrent page fetches during crawl (default 5, clamped to 20) |
 
 ### Example cURL
 
@@ -190,16 +194,16 @@ curl -X POST "http://127.0.0.1:8000/api/v1/ingest/sitemap" \
 ```json
 {
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "estimated_articles": 150
+  "status": "queued"
 }
 ```
 
 ### Notes
 
-- The crawler extracts clean text with `trafilatura`.
+- The crawl runs asynchronously; poll `/api/v1/ingest/status/{jobID}` for progress. This endpoint returns immediately with a `job_id`.
+- The crawler strips scripts, styles, navigation, and footer boilerplate, then converts the remaining HTML to text.
 - The same crawl also extracts internal `<a href>` links from page HTML.
-- Those links are inverted into inbound link counts and used by the equity-aware reranker.
+- Those links are inverted into inbound link counts and merged into the existing graph used by the equity-aware reranker.
 
 ---
 
@@ -299,13 +303,17 @@ curl "http://127.0.0.1:8000/api/v1/link-graph"
 
 ## Authentication
 
-All endpoints except `/api/v1/health` require a Clerk JWT `Bearer` token in the `Authorization` header when `CLERK_SECRET_KEY` is configured.
+Auth is fail-closed: the server refuses to start if `CLERK_SECRET_KEY` is unset unless `AUTH_DISABLED=true` is explicitly set. When auth is enabled, every endpoint except `/api/v1/health` requires a Clerk JWT `Bearer` token in the `Authorization` header. Requests without one receive `401`.
+
+```bash
+-H "Authorization: Bearer <clerk_session_token>"
+```
 
 ---
 
 ## `GET /api/v1/health`
 
-Simple health check endpoint.
+Health check with per-dependency status.
 
 ### Example cURL
 
@@ -318,9 +326,13 @@ curl "http://127.0.0.1:8000/api/v1/health"
 ```json
 {
   "status": "ok",
-  "model_loaded": true
+  "qdrant": "ok",
+  "redis": "ok",
+  "models": "configured"
 }
 ```
+
+`status` is `ok` only when Qdrant and Redis are reachable; otherwise `degraded`. HTTP is always `200` (liveness).
 
 ---
 

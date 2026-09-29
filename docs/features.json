@@ -1,14 +1,14 @@
 {
   "project": "AutoLinks",
-  "last_updated": "2026-08-05",
+  "last_updated": "2026-09-29",
   "summary": {
-    "total": 28,
-    "completed": 28,
+    "total": 29,
+    "completed": 29,
     "in_progress": 0,
     "planned": 0,
-    "tests_passing": 8,
+    "tests_passing": 64,
     "tests_failing": 0,
-    "tests_missing": 0
+    "tests_missing": 5
   },
   "features": [
     {
@@ -47,7 +47,7 @@
         "notes": "Tests cover embed_text and batch embedding via HF Space, plus 384-dim vector validation."
       },
       "subtasks": [],
-      "notes": "v1: local SentenceTransformer on Render. v2: migrating to self-hosted MiniLM on HF Space (see F020). Local model kept as dev fallback when MODELS_SPACE_URL is unset.",
+      "notes": "v1: local SentenceTransformer on Render. v2: all inference via HF Space. No local model or fallback exists in-process; if MODELS_SPACE_URL is unset, EmbedBatch returns an error.",
       "added": "2026-04-30",
       "completed": "2026-04-30"
     },
@@ -60,7 +60,7 @@
       "module": "backend/internal/search/search.go",
       "design_doc": "docs/design.md",
       "tests": {
-        "status": "completed",
+        "status": "missing",
         "files": [],
         "notes": "No Go tests yet. Search is exercised indirectly through handler integration tests."
       },
@@ -100,10 +100,9 @@
       "tests": {
         "status": "completed",
         "files": [
-          "backend/internal/ingest/chunk_test.go",
-          "backend/internal/ingest/linkgraph_test.go"
+          "backend/internal/ingest/chunk_test.go"
         ],
-        "notes": "Tests cover sliding-window text chunking and internal link graph construction from sitemap crawls."
+        "notes": "Tests cover sliding-window text chunking, internal link extraction, and internal link graph construction from sitemap crawls."
       },
       "subtasks": [],
       "notes": "v1: synchronous single-request ingest \u2014 times out on Render free tier for 150+ article sitemaps. v2: converting to async job queue via Redis + goroutine pool (see F021, F022, F023).",
@@ -123,7 +122,7 @@
         "files": [
           "backend/internal/handlers/routes_test.go"
         ],
-        "notes": "Integration tests with mocked core modules cover min_similarity forwarding, widened retrieval depth, and URL-diverse recommendations across multiple entities."
+        "notes": "Tests cover request validation, dry-run extraction path, and embedding-service failure handling. Full recommendation flow is not mocked end-to-end."
       },
       "subtasks": [],
       "notes": "Recommend requests query a wider candidate pool, rerank at the URL level, and avoid repeating the same destination URL within a single response unless new URLs are exhausted.",
@@ -163,7 +162,7 @@
         "files": [
           "backend/internal/handlers/routes_test.go"
         ],
-        "notes": "Tests verify health endpoint returns Qdrant/Redis connection status and correct HTTP codes."
+        "notes": "Tests verify the health response shape (status/qdrant/redis/models)."
       },
       "subtasks": [],
       "notes": "",
@@ -184,7 +183,7 @@
         "notes": "Tests for config defaults and env var loading"
       },
       "subtasks": [],
-      "notes": "v2: adding MODELS_SPACE_URL, REDIS_URL, REDIS_SSL. Removing deprecated PIONEER_API_KEY and GLINER_URL.",
+      "notes": "v2: MODELS_SPACE_URL and REDIS_URL added. Auth is fail-closed: the server refuses to start without CLERK_SECRET_KEY unless AUTH_DISABLED=true. ALLOW_PRIVATE_FETCH gates crawling of private addresses. Parse errors for bool/int/float env vars log a warning and fall back to the default.",
       "added": "2026-04-30",
       "completed": "2026-04-30"
     },
@@ -238,7 +237,7 @@
         "notes": "Standalone eval binary with timing instrumentation. No separate test file."
       },
       "subtasks": [],
-      "notes": "Eval 1 from design.md - latency benchmark against 3-second target. Run with: go run ./backend/eval/latency",
+      "notes": "Eval 1 from design.md - latency benchmark against 3-second target. Run with: (cd backend && go run ./eval/latency)",
       "added": "2026-05-02",
       "completed": "2026-05-04"
     },
@@ -256,7 +255,7 @@
         "notes": "Standalone eval binary. No separate test file."
       },
       "subtasks": [],
-      "notes": "Eval 4 - fetches the server's active link graph, lowers min_similarity during evaluation to expose a wider rerank candidate pool, and computes distribution metrics on the projected full graph.",
+      "notes": "Eval 4 - fetches the server's active link graph, sends min_similarity=0 to expose a wider rerank candidate pool, and computes distribution metrics on the projected full graph. Results are not yet published in docs/evals.md.",
       "added": "2026-05-02",
       "completed": "2026-05-04"
     },
@@ -274,7 +273,7 @@
         "notes": "UI flow covered by manual verification via production build; no component-level automated navigation tests yet."
       },
       "subtasks": [],
-      "notes": "Header tabs and the avatar dropdown navigate to the landing page, analyzer workspace, FAQ glossary, and backend API docs.",
+      "notes": "Header tabs navigate to the landing page, the analyzer workspace, and the sitemap page. The former FAQ page and API-docs link were removed.",
       "added": "2026-05-02",
       "completed": "2026-05-02"
     },
@@ -350,7 +349,7 @@
         "notes": "Standalone eval binary using Groq SDK. No separate test file."
       },
       "subtasks": [],
-      "notes": "Eval 2 - uses the Groq API, falls back to JSON object mode for unsupported models, and enriches judgment with cached target-page excerpts.",
+      "notes": "Eval 2 - uses the Groq API, falls back to JSON object mode for unsupported models, and enriches judgment with cached target-page excerpts. Requires a Clerk bearer token for the deployed API; results are not yet published in docs/evals.md.",
       "added": "2026-05-15",
       "completed": "2026-05-15"
     },
@@ -377,7 +376,7 @@
     {
       "id": "F020",
       "name": "HF Space Model Serving",
-      "description": "Self-host GLiNER and MiniLM inference on a combined HuggingFace Space (eros483/autolinks-models) with FastAPI endpoints POST /extract, POST /embed, and GET /health.",
+      "description": "Self-host GLiNER and MiniLM inference on a combined HuggingFace Gradio Space (eros483/autolinks-models) with call endpoints gradio_api/call/extract_entities and gradio_api/call/embed_text.",
       "status": "completed",
       "priority": "high",
       "module": "hf-space:eros483/autolinks-models",
@@ -385,24 +384,23 @@
       "tests": {
         "status": "completed",
         "files": [],
-        "notes": "Test Space endpoints return correct entity and embedding shapes. Test health endpoint reports both models loaded."
+        "notes": "Manually verified Space endpoints return correct entity and embedding shapes."
       },
       "subtasks": [
-        "Create Space Dockerfile with fastapi, uvicorn, sentence-transformers, gliner",
-        "Implement POST /extract endpoint wrapping fastino/gliner2-base-v1",
-        "Implement POST /embed endpoint wrapping all-MiniLM-L6-v2",
-        "Implement GET /health endpoint with model load status",
+        "Create Space Dockerfile with gradio, sentence-transformers, gliner",
+        "Implement extract_entities endpoint wrapping fastino/gliner2-base-v1",
+        "Implement embed_text endpoint wrapping all-MiniLM-L6-v2",
         "Set HF_HOME=/data/hf_cache for persistent model caching",
         "Deploy via hf spaces create + hf upload"
       ],
-      "notes": "Single Space serves both models. cpu-basic free tier (16GB RAM) is ample. Models loaded at startup to avoid cold-start penalty on first request. Benefits: frees ~150MB RAM from Render web and worker services.",
+      "notes": "Single Gradio Space serves both models. Runs on a GPU-backed Space (the app uses @spaces.GPU), not cpu-basic. Models loaded at startup to avoid cold-start penalty on first request. Benefits: frees RAM from the Render web service.",
       "added": "2026-07-20",
       "completed": "2026-07-20"
     },
     {
       "id": "F021",
       "name": "Async Ingestion Job Queue",
-      "description": "Replace Celery with in-process goroutine worker pool (4 workers, semaphore-bounded, 3 retries with backoff). API returns job_id; workers process in background.",
+      "description": "Replace Celery with an in-process goroutine worker pool (4 workers, bounded per-URL fetch concurrency, 3 retries with backoff). API returns job_id; workers process in background.",
       "status": "completed",
       "priority": "high",
       "module": "backend/internal/jobs/manager.go, backend/internal/jobs/worker.go",
@@ -416,14 +414,14 @@
       },
       "subtasks": [
         "Add go-redis dependency for Redis job state management",
-        "Create goroutine worker pool (4 workers, semaphore-bounded at 5 concurrent fetches)",
+        "Create goroutine worker pool (4 workers, per-URL concurrency from max_concurrent)",
         "Create JobManager (generate job_id, track status/progress, store results in Redis)",
-        "Create worker task wrapping crawl_and_extract -> build_link_graph -> ingest_article flow",
+        "Create worker task wrapping crawl -> build_link_graph -> ingest_article flow",
         "Add GET /ingest/status/{job_id} and GET /ingest/result/{job_id} endpoints",
         "Refactor POST /ingest/sitemap to enqueue job instead of running synchronously",
-        "Add Upstash REDIS_URL and REDIS_SSL config vars"
+        "Add Upstash REDIS_URL config var"
       ],
-      "notes": "Fixes Render free-tier timeout for 150+ article sitemap ingests. Job lifecycle: queued -> processing -> done/failed. Celery concurrency=8 gives parallel article processing.",
+      "notes": "Fixes Render free-tier timeout for 150+ article sitemap ingests. Job lifecycle: queued -> processing -> retrying -> done/failed. Non-blocking enqueue returns 503 when the buffer is full. Pending jobs are reconciled on startup.",
       "added": "2026-07-20",
       "completed": "2026-07-20"
     },
@@ -448,7 +446,7 @@
         "Configure worker with max_retries=3 and on_failure push to DLQ",
         "Add POST /ingest/retry-dead endpoint to pop and re-enqueue failed jobs"
       ],
-      "notes": "Failed jobs accumulate in DLQ for inspection. Manual trigger via API retries them. Prevents silent data loss during sitemap crawls.",
+      "notes": "Failed jobs accumulate in DLQ for manual retry via API. A job reaches the DLQ only when the whole job fails (sitemap parse failure, enqueue failure, or every page failing); individual page failures are recorded on the job's errors list instead. Prevents silent whole-job data loss.",
       "added": "2026-07-20",
       "completed": "2026-07-20"
     },
@@ -467,12 +465,12 @@
       },
       "subtasks": [
         "Create worker pool in cmd/server/main.go (starts with HTTP server, no separate process)",
-        "Configure concurrency: 4 workers, semaphore-bounded at 5 concurrent fetches",
-        "Configure worker environment variables (MODELS_SPACE_URL, REDIS_URL, QDRANT_*, HF_API_KEY)",
-        "Set up Upstash Redis connection with TLS support",
+        "Configure concurrency: 4 workers; per-URL fetch concurrency from max_concurrent",
+        "Configure worker environment variables (MODELS_SPACE_URL, REDIS_URL, QDRANT_*, HF_TOKEN)",
+        "Set up Upstash Redis connection",
         "No separate deployment needed -- worker pool runs in-process"
       ],
-      "notes": "Worker is a separate Render free-tier service. No web port needed \u2014 Render supports Background Worker type. Concurrency=8 possible because models are offloaded to HF Space (worker RAM ~80MB).",
+      "notes": "Worker pool runs in the same process as the HTTP server. No separate Render service or background worker. Job queue is an in-memory buffered channel, so queued jobs are lost on restart and recovered from Redis on startup.",
       "added": "2026-07-20",
       "completed": "2026-07-20"
     },
@@ -536,22 +534,22 @@
       },
       "subtasks": [
         "Rewrite Dockerfile: multi-stage build (golang:1.25-alpine -> alpine:3.21)",
-        "COPY go.mod go.sum, RUN go mod download",
-        "COPY . ., RUN go build -o server ./cmd/server",
-        "Final stage: alpine:3.21, COPY --from=builder /app/server .",
-        "EXPOSE 8000, CMD [./server]"
+        "COPY backend/go.mod backend/go.sum, RUN go mod download (build context = repo root)",
+        "COPY backend/ ., RUN go build -o /server ./cmd/server",
+        "Final stage: alpine:3.21, COPY --from=builder /server /server",
+        "EXPOSE 8000, CMD [\"/server\"]"
       ],
-      "notes": "Removes pip dependency from Docker build. Smaller image since --no-dev skips sentence-transformers (now dev-only). Must match Python version in Dockerfile to pyproject.toml (3.13).",
+      "notes": "Go-only image; the build no longer involves pip or Python. Build context is the repository root; the Dockerfile copies backend/ and builds ./cmd/server.",
       "added": "2026-07-20",
       "completed": "2026-07-20"
     },
     {
       "id": "F027",
       "name": "Pioneer API Removal",
-      "description": "Remove deprecated Pioneer.ai API integration from extract.py and config.py. Replace with HF Space call.",
+      "description": "Remove deprecated Pioneer.ai API integration. Replace with HF Space call.",
       "status": "completed",
       "priority": "high",
-      "module": "backend/core/extract.py, backend/utils/config.py",
+      "module": "backend/internal/extract/entities.go, backend/internal/config/config.go",
       "design_doc": "docs/v2.md",
       "tests": {
         "status": "completed",
@@ -561,10 +559,10 @@
         "notes": "Go tests verify entity extraction from HF Space SSE responses instead of Pioneer API."
       },
       "subtasks": [
-        "Replace Pioneer httpx.post call with HF Space POST /extract call",
-        "Simplify entity response parsing (HF Space returns flat list, no nested choices[0].message.content)",
-        "Remove pioneer_api_key and gliner_url from config.py",
-        "Add models_space_url to config.py",
+        "Replace Pioneer HTTP call with HF Space gradio_api/call/extract_entities call",
+        "Simplify entity response parsing",
+        "Remove pioneer_api_key and gliner_url config",
+        "Add models_space_url config",
         "Update DRY_RUN fixture entities to match new code path"
       ],
       "notes": "Pioneer.ai stopped offering free API keys. This is the direct trigger for the v2 migration. HF Space format is simpler than Pioneer's OpenAI-chat wrapper, reducing code complexity.",
@@ -574,7 +572,7 @@
     {
       "id": "F028",
       "name": "Go Backend Migration",
-      "description": "Rewrite the entire backend from Python/FastAPI to Go/chi. Replace Celery with in-process goroutine worker pool. Swap trafilatura for go-trafilatura. Remove local sentence-transformers fallback. Rewrite all 52 tests and 3 eval scripts in Go.",
+      "description": "Rewrite the entire backend from Python/FastAPI to Go/chi. Replace Celery with an in-process goroutine worker pool. Replace trafilatura with built-in HTML noise stripping. Remove local sentence-transformers fallback. Rewrite the test suite and eval scripts in Go.",
       "status": "completed",
       "priority": "high",
       "module": "backend/cmd/server/main.go, backend/internal/*.go, backend/eval/*/main.go, backend/Dockerfile",
@@ -590,7 +588,7 @@
           "backend/internal/jobs/manager_test.go",
           "backend/internal/jobs/dlq_test.go"
         ],
-        "notes": "50 Go tests passing across 7 test files. Tests cover entity extraction, embedding, re-ranking, chunking, link graph, handlers, job manager, and DLQ. Uses testify/assert and miniredis for mocking."
+        "notes": "55 Go tests passing across 8 test files. Tests cover entity extraction, embedding, re-ranking, chunking, link graph, handlers, auth, job manager, and DLQ. Uses testify/assert and miniredis for mocking."
       },
       "subtasks": [
         "Phase 1: Project scaffold (cmd/server/main.go, config, logger, qdrant client)",
@@ -598,16 +596,49 @@
         "Phase 3: Ingest modules (chunk, crawl, linkgraph)",
         "Phase 4: Models (request/response structs)",
         "Phase 5: Jobs (manager, worker pool, DLQ)",
-        "Phase 6: HTTP handlers (chi router, all 8 endpoints, CORS)",
-        "Phase 7: Tests (50 passing across 7 test files)",
-        "Phase 8: Eval scripts (latency, precision, equity)",
+        "Phase 6: HTTP handlers (chi router, all 8 endpoints, CORS, auth)",
+        "Phase 7: Tests (55 passing across 8 test files)",
+        "Phase 8: Eval scripts (latency, precision, equity, throughput)",
         "Phase 9: Dockerfile (multi-stage build, alpine runtime)",
         "Phase 10: Documentation (features.json, api.md, deployment.md)",
         "Phase 11: go mod tidy, go fmt, go vet clean"
       ],
-      "notes": "Goroutine pool (4 workers, semaphore-bounded at 5 concurrent fetches, 3 retries with exponential backoff 30s/60s/120s, DLQ in Redis) replaces Celery entirely. Qdrant gRPC client (port 6334) replaces Python REST client. All 8 API endpoints preserved with byte-for-byte compatible JSON shapes. Image size ~15MB, RAM idle ~25MB, cold start <1s.",
+      "notes": "Goroutine pool (4 workers, per-URL concurrency from max_concurrent, 3 retries with exponential backoff 30s/60s/120s, DLQ in Redis) replaces Celery entirely. Qdrant gRPC client (port 6334) replaces the Python REST client. Image size ~15MB, RAM idle ~25MB, cold start <1s. Response JSON shapes were adjusted after migration (health now reports per-dependency status; sitemap returns job_id only).",
       "added": "2026-07-20",
       "completed": "2026-07-20"
+    },
+    {
+      "id": "F029",
+      "name": "Security & Robustness Hardening",
+      "description": "Fail-closed auth, SSRF-guarded outbound fetching, panic-safe workers, job reconciliation, per-IP rate limiting, real health checks, and doc truth pass.",
+      "status": "completed",
+      "priority": "high",
+      "module": "backend/internal/ingest/fetch.go, backend/internal/jobs/worker.go, backend/cmd/server/main.go",
+      "design_doc": "docs/design.md",
+      "tests": {
+        "status": "completed",
+        "files": [
+          "backend/internal/handlers/routes_test.go",
+          "frontend/src/services/api.test.js",
+          "frontend/src/utils/editor_highlight.test.js"
+        ],
+        "notes": "Covers health response shape, sitemap async contract, job-status mapping, and safe highlight markup."
+      },
+      "subtasks": [
+        "Refuse to boot without CLERK_SECRET_KEY unless AUTH_DISABLED=true",
+        "Add hardened fetch: scheme allowlist, private-IP block, redirect cap, 10MB limit",
+        "Add recover() around workers and per-URL jobs; validate embedding counts",
+        "Bounded per-URL workers honoring max_concurrent; non-blocking Enqueue",
+        "Merge link graph instead of replacing; record per-page failures",
+        "Reconcile pending jobs on startup; graceful worker drain",
+        "Delete stale Qdrant points before re-ingest; validate collection dimension",
+        "Explicit alpha/min_similarity (incl. 0) with range validation",
+        "Real health checks, per-IP rate limit, infra errors -> 503 not 404",
+        "Strip script/style/nav noise; bounded sitemap recursion"
+      ],
+      "notes": "Addresses the adversarial review findings. Corrects false claims across docs and features.json.",
+      "added": "2026-09-29",
+      "completed": "2026-09-29"
     }
   ]
 }

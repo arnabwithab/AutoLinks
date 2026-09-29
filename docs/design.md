@@ -153,7 +153,7 @@ The equity-aware system (α=0.7) ranks: Page B (0.895) > Page C (0.787) > Page A
 
 ### 4.8 Link Graph Infrastructure
 
-The link graph is an in-memory `map[string]int` mapping each URL on the site to its inbound link count. The map is protected by `sync.RWMutex`: many readers (every recommendation request reads the graph for re-ranking) and one writer (ingestion replaces the graph wholesale). The choice of a single mutex over a concurrent map was deliberate: the graph is small (hundreds to low thousands of URLs), reads are extremely fast (map lookup), and contention is low because writes only happen during ingestion, not during normal traffic.
+The link graph is an in-memory `map[string]int` mapping each URL on the site to its inbound link count. The map is protected by `sync.RWMutex`: many readers (every recommendation request reads the graph for re-ranking) and one writer (ingestion merges new counts into the graph). The choice of a single mutex over a concurrent map was deliberate: the graph is small (hundreds to low thousands of URLs), reads are extremely fast (map lookup), and contention is low because writes only happen during ingestion, not during normal traffic. Ingestion **merges** rather than replaces, so crawling a second sitemap preserves the first one's URLs and equity counts.
 
 The graph survives restarts via Redis. On server startup, it is restored from key `autolinks:link_graph`. On ingestion completion, the new graph is persisted to the same key. The persistence path is best-effort — if Redis is unreachable, the graph is held in memory and operates normally for the server's lifetime. The next restart would lose the graph, but the server would still function (just without equity awareness until the next ingestion).
 
@@ -175,9 +175,9 @@ The solution is an async job queue backed by a goroutine worker pool. The API en
 
 Four persistent goroutines block on a buffered channel (capacity 100). When a job is enqueued, one goroutine picks it up. The worker pool starts with the HTTP server and shares its process lifetime — no separate worker binary, no process manager, no Celery broker.
 
-**Why goroutines over an external queue:** The Go runtime can multiplex thousands of goroutines onto OS threads efficiently. The ingestion workload is I/O-bound (HTTP fetches) with modest CPU (regex extraction, JSON serialization). Four workers is more than enough — the actual parallelism bottleneck is the semaphore limiting concurrent fetches to 5, not the number of workers consuming from the channel. A separate worker process (like the original Celery design) would require managing two Render services, coordinating through Redis, and dealing with process supervision. The goroutine pool eliminates all of this complexity: one process, one deployment, one lifecycle.
+**Why goroutines over an external queue:** The Go runtime can multiplex thousands of goroutines onto OS threads efficiently. The ingestion workload is I/O-bound (HTTP fetches) with modest CPU (regex extraction, JSON serialization). Four workers is more than enough — the actual parallelism bottleneck is the bounded set of per-URL fetch workers, not the number of workers consuming from the channel. A separate worker process (like the original Celery design) would require managing two Render services, coordinating through Redis, and dealing with process supervision. The goroutine pool eliminates all of this complexity: one process, one deployment, one lifecycle.
 
-**Bounded concurrency:** Within each job, article processing uses `semaphore.Weighted(5)`. This limits simultaneous HTTP fetches to 5, preventing the system from overwhelming the target server with hundreds of concurrent connections. The number 5 was chosen as a conservative crawl rate: fast enough to complete ingestion in under a minute, slow enough to not trigger rate limiting or appear as aggressive scraping.
+**Bounded concurrency:** Within each job, article processing fans URLs out to a fixed set of worker goroutines sized by the job's `max_concurrent` (default 5, clamped to 20). This limits simultaneous HTTP fetches, preventing the system from overwhelming the target server with hundreds of concurrent connections. The default of 5 was chosen as a conservative crawl rate: fast enough to complete ingestion in under a minute, slow enough to not trigger rate limiting or appear as aggressive scraping.
 
 ### 5.3 Retry and Failure Handling
 
@@ -344,7 +344,7 @@ This structure means the runtime image contains no build tools, no source code, 
 
 ### 9.1 No Rate Limiting
 
-There is no per-user or per-IP rate limiting. On a free-tier deployment serving a single user, this is irrelevant. For a multi-user system, rate limiting would need to be added at the middleware layer — likely token-bucket or sliding-window based, keyed by Clerk user ID from the auth context.
+There is a per-IP fixed-window rate limiter at the middleware layer (120 requests/minute). It is in-process, so with more than one replica it must move to Redis or an upstream limiter; and for per-user quotas it should key on the Clerk user ID from the auth context rather than the client IP.
 
 ### 9.2 No Request Deduplication
 
