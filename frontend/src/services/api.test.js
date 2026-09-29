@@ -29,7 +29,7 @@ describe('sitemap api helpers', () => {
     const result = await fetchSitemapStatus()
 
     expect(fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/v1/link-graph',
+      'https://autolinks.onrender.com/api/v1/link-graph',
       expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
     )
     expect(result).toEqual({
@@ -50,7 +50,7 @@ describe('sitemap api helpers', () => {
     const result = await ingestSitemap('https://example.com/post-sitemap.xml', 7)
 
     expect(fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/v1/ingest/sitemap',
+      'https://autolinks.onrender.com/api/v1/ingest/sitemap',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

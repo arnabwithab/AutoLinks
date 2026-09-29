@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
+const DEFAULT_API_BASE_URL = 'https://autolinks.onrender.com/api/v1'
 const REQUEST_TIMEOUT_MS = 30000
 
 export function getApiBaseUrl(env = import.meta.env) {

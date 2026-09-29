@@ -64,6 +64,7 @@ func NewRouter(tokenVerifier auth.TokenVerifier) chi.Router {
 		MaxAge:           300,
 	}))
 
+	r.Get("/", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
 
 	r.Group(func(r chi.Router) {
