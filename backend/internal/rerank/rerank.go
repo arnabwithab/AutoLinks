@@ -28,13 +28,27 @@ func init() {
 	linkGraph = make(map[string]int)
 }
 
-// InitLinkGraph initializes the link graph with pre-computed inbound link counts.
+// InitLinkGraph initializes the link graph with pre-computed inbound link counts,
+// replacing any existing graph.
 func InitLinkGraph(graph map[string]int) {
 	linkGraphMu.Lock()
 	defer linkGraphMu.Unlock()
 	linkGraph = graph
 	saveLinkGraph(graph)
 	logger.Info("Link graph initialized with %d URLs", len(linkGraph))
+}
+
+// MergeLinkGraph merges crawled inbound link counts into the existing graph.
+// URLs already present are updated; URLs from other crawls are preserved, so
+// crawling a second sitemap does not wipe the first one's equity data.
+func MergeLinkGraph(graph map[string]int) {
+	linkGraphMu.Lock()
+	defer linkGraphMu.Unlock()
+	for url, count := range graph {
+		linkGraph[url] = count
+	}
+	saveLinkGraph(linkGraph)
+	logger.Info("Link graph merged: %d URLs total", len(linkGraph))
 }
 
 // RestoreLinkGraph restores the link graph from Redis on startup.
@@ -147,11 +161,8 @@ type Candidate struct {
 }
 
 // RerankCandidates re-ranks Qdrant results using equity-aware scoring.
+// alpha must be resolved by the caller (0 is a valid, pure-equity value).
 func RerankCandidates(candidates []Candidate, alpha float64, excludedURLs map[string]bool) []Candidate {
-	if alpha == 0 {
-		alpha = config.RerankAlpha()
-	}
-
 	uniqueCandidates := CollapseCandidatesByURL(candidates)
 
 	var reranked []Candidate

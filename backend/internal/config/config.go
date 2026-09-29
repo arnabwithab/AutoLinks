@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/joho/godotenv"
 )
 
@@ -28,6 +29,7 @@ func GetBool(key string) bool {
 	}
 	b, err := strconv.ParseBool(val)
 	if err != nil {
+		logger.Warning("config: invalid bool for %s=%q, defaulting to false", key, val)
 		return false
 	}
 	return b
@@ -41,6 +43,7 @@ func GetFloat(key string, fallback float64) float64 {
 	}
 	f, err := strconv.ParseFloat(val, 64)
 	if err != nil {
+		logger.Warning("config: invalid float for %s=%q, using default %v", key, val, fallback)
 		return fallback
 	}
 	return f
@@ -54,6 +57,7 @@ func GetInt(key string, fallback int) int {
 	}
 	i, err := strconv.Atoi(val)
 	if err != nil {
+		logger.Warning("config: invalid int for %s=%q, using default %v", key, val, fallback)
 		return fallback
 	}
 	return i
@@ -76,6 +80,8 @@ var (
 	RerankAlpha      = func() float64 { return GetFloat("RERANK_ALPHA", 0.7) }
 	RedisURL         = func() string { return Get("REDIS_URL", "") }
 	ClerkSecretKey   = func() string { return Get("CLERK_SECRET_KEY", "") }
-	FrontendURL      = func() string { return Get("FRONTEND_URL", "http://localhost:3000,https://autolinks-seo.vercel.app") }
+	AuthDisabled     = func() bool { return GetBool("AUTH_DISABLED") }
+	AllowPrivateFetch = func() bool { return GetBool("ALLOW_PRIVATE_FETCH") }
+	FrontendURL      = func() string { return Get("FRONTEND_URL", "http://localhost:3000,https://autolinks.vercel.app") }
 	Port             = func() string { return Get("PORT", "8000") }
 )

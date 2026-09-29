@@ -51,6 +51,11 @@ func RequireAuth(client TokenVerifier) func(http.Handler) http.Handler {
 				writeUnauthorized(w)
 				return
 			}
+			if claims == nil {
+				logger.Error("Token verification returned nil claims")
+				writeUnauthorized(w)
+				return
+			}
 
 			ctx := context.WithValue(r.Context(), userIDKey, claims.Subject)
 			next.ServeHTTP(w, r.WithContext(ctx))

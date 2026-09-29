@@ -2,7 +2,6 @@
 package jobs
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -10,20 +9,23 @@ import (
 	"github.com/arnabwithab/AutoLinks/backend/internal/ingest"
 	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/arnabwithab/AutoLinks/backend/internal/rerank"
-	"golang.org/x/sync/semaphore"
 )
 
 const (
-	maxWorkers     = 4
-	maxConcurrent  = 5
-	maxRetries     = 3
-	baseDelay      = 30 * time.Second
-	jobsChanBuffer = 100
+	maxWorkers         = 4
+	maxConcurrent      = 5
+	minConcurrent      = 1
+	maxConcurrentLimit = 20
+	maxRetries         = 3
+	baseDelay          = 30 * time.Second
+	jobsChanBuffer     = 100
+	maxRecordedErrors  = 10
 )
 
 // WorkerPool manages a pool of goroutines that process ingest jobs.
 type WorkerPool struct {
 	jobs chan *Job
+	wg   sync.WaitGroup
 }
 
 // NewWorkerPool creates and starts a new worker pool.
@@ -33,6 +35,7 @@ func NewWorkerPool() *WorkerPool {
 	}
 
 	for i := 0; i < maxWorkers; i++ {
+		wp.wg.Add(1)
 		go wp.workerLoop(i)
 	}
 
@@ -40,16 +43,69 @@ func NewWorkerPool() *WorkerPool {
 	return wp
 }
 
-// Enqueue submits a job to the worker pool for processing.
-func (wp *WorkerPool) Enqueue(job *Job) {
-	wp.jobs <- job
+// Enqueue submits a job without blocking. It returns false if the queue is full.
+func (wp *WorkerPool) Enqueue(job *Job) bool {
+	select {
+	case wp.jobs <- job:
+		return true
+	default:
+		logger.Warning("Job queue full, refusing job %s", job.JobID)
+		return false
+	}
+}
+
+// Stop closes the queue and waits for in-flight jobs to finish.
+func (wp *WorkerPool) Stop() {
+	close(wp.jobs)
+	wp.wg.Wait()
+}
+
+// ReconcileJobs re-enqueues jobs left in a non-terminal state by a previous
+// process (deploy, crash, or restart). Single-instance assumption: it does not
+// coordinate with another running replica.
+func ReconcileJobs(pool *WorkerPool) int {
+	pending, err := PendingJobs()
+	if err != nil {
+		logger.Error("Failed to list pending jobs: %s", err)
+		return 0
+	}
+
+	enqueued := 0
+	for _, job := range pending {
+		if uErr := UpdateJob(job.JobID, map[string]interface{}{"status": "queued"}); uErr != nil {
+			logger.Error("Failed to reset pending job %s: %s", job.JobID, uErr)
+			continue
+		}
+		job.Status = "queued"
+		if pool.Enqueue(job) {
+			enqueued++
+		}
+	}
+	return enqueued
 }
 
 func (wp *WorkerPool) workerLoop(workerID int) {
+	defer wp.wg.Done()
 	for job := range wp.jobs {
 		logger.Info("Worker %d processing job %s", workerID, job.JobID)
-		wp.processJobWithRetry(job)
+		wp.processJobSafely(job)
 	}
+}
+
+// processJobSafely isolates a job so a panic cannot take down the process.
+func (wp *WorkerPool) processJobSafely(job *Job) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Worker panic on job %s: %v", job.JobID, r)
+			if uErr := UpdateJob(job.JobID, map[string]interface{}{"status": "failed"}); uErr != nil {
+				logger.Error("Failed to mark panicked job %s failed: %s", job.JobID, uErr)
+			}
+			if aErr := AddJobError(job.JobID, fmt.Sprintf("worker panic: %v", r)); aErr != nil {
+				logger.Error("Failed to record panic for job %s: %s", job.JobID, aErr)
+			}
+		}
+	}()
+	wp.processJobWithRetry(job)
 }
 
 func (wp *WorkerPool) processJobWithRetry(job *Job) {
@@ -100,6 +156,8 @@ func (wp *WorkerPool) processJob(job *Job) error {
 		return fmt.Errorf("sitemap_url not found in job args")
 	}
 
+	concurrency := resolveConcurrency(job.Args)
+
 	urls := ingest.ParseSitemap(sitemapURL)
 	if len(urls) == 0 {
 		return fmt.Errorf("no URLs found in sitemap")
@@ -112,59 +170,92 @@ func (wp *WorkerPool) processJob(job *Job) error {
 		logger.Error("Failed to update job %s totals: %s", job.JobID, uErr)
 	}
 
-	outboundMap := make(map[string][]string)
-	done := 0
-
-	sem := semaphore.NewWeighted(maxConcurrent)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	var jobErr error
-	ctx := context.Background()
+	outboundMap := make(map[string][]string)
+	var failures []string
+	done := 0
 
-	for _, rawURL := range urls {
+	urlCh := make(chan string)
+	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		go func(url string) {
+		go func() {
 			defer wg.Done()
-
-			if err := sem.Acquire(ctx, 1); err != nil {
+			for u := range urlCh {
+				links, err := processURL(u)
 				mu.Lock()
-				if jobErr == nil {
-					jobErr = fmt.Errorf("semaphore acquire: %w", err)
+				if err != nil {
+					failures = append(failures, u+": "+err.Error())
+				} else {
+					done++
+					outboundMap[u] = links
 				}
 				mu.Unlock()
-				return
 			}
-			defer sem.Release(1)
-
-			links := ingest.StreamFetchEmbedUpsert(url)
-
-			mu.Lock()
-			if links != nil {
-				done++
-				outboundMap[url] = links
-			}
-			mu.Unlock()
-		}(rawURL)
+		}()
 	}
 
+	for _, u := range urls {
+		urlCh <- u
+	}
+	close(urlCh)
 	wg.Wait()
 
-	if jobErr != nil {
-		return jobErr
+	if uErr := UpdateJob(job.JobID, map[string]interface{}{"articles_done": done}); uErr != nil {
+		logger.Error("Failed to update job %s done count: %s", job.JobID, uErr)
 	}
 
-	_ = UpdateJob(job.JobID, map[string]interface{}{"articles_done": done})
-
 	job.ArticlesDone = done
+
+	for i, f := range failures {
+		if i >= maxRecordedErrors {
+			_ = AddJobError(job.JobID, fmt.Sprintf("%d more page failures not shown", len(failures)-maxRecordedErrors))
+			break
+		}
+		if aErr := AddJobError(job.JobID, f); aErr != nil {
+			logger.Error("Failed to record page failure for job %s: %s", job.JobID, aErr)
+		}
+	}
 
 	if len(outboundMap) > 0 {
 		pages := make(ingest.PageMap)
 		for url, lnks := range outboundMap {
 			pages[url] = &ingest.PageData{OutboundLinks: lnks}
 		}
-		graph := ingest.BuildLinkGraph(pages)
-		rerank.InitLinkGraph(graph)
+		rerank.MergeLinkGraph(ingest.BuildLinkGraph(pages))
+	}
+
+	if done == 0 {
+		return fmt.Errorf("all %d pages failed", len(urls))
 	}
 
 	return nil
+}
+
+func processURL(u string) (links []string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return ingest.StreamFetchEmbedUpsert(u)
+}
+
+func resolveConcurrency(args map[string]interface{}) int {
+	concurrency := maxConcurrent
+	if v, ok := args["max_concurrent"]; ok {
+		switch n := v.(type) {
+		case float64:
+			concurrency = int(n)
+		case int:
+			concurrency = n
+		}
+	}
+	if concurrency < minConcurrent {
+		concurrency = minConcurrent
+	}
+	if concurrency > maxConcurrentLimit {
+		concurrency = maxConcurrentLimit
+	}
+	return concurrency
 }

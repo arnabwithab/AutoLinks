@@ -26,7 +26,10 @@ func TestHandleHealth(t *testing.T) {
 
 	var resp map[string]interface{}
 	json.NewDecoder(w.Body).Decode(&resp)
-	assert.Equal(t, "ok", resp["status"])
+	assert.Contains(t, resp, "status")
+	assert.Contains(t, resp, "qdrant")
+	assert.Contains(t, resp, "redis")
+	assert.Contains(t, resp, "models")
 }
 
 func TestHandleRecommendRequiresText(t *testing.T) {

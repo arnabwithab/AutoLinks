@@ -4,7 +4,6 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
@@ -95,7 +94,7 @@ func PopDLQEntries(count int) []DLQEntry {
 func GetDLQCount() (int64, error) {
 	rds := getRedis()
 	if rds == nil {
-		return 0, fmt.Errorf("redis not configured")
+		return 0, ErrNotConfigured
 	}
 
 	ctx := context.Background()

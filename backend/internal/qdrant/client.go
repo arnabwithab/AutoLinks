@@ -75,6 +75,13 @@ func EnsureCollection(vectorSize int) error {
 		return fmt.Errorf("failed to check collection existence: %w", err)
 	}
 	if exists {
+		info, infoErr := c.GetCollectionInfo(ctx, collectionName)
+		if infoErr != nil {
+			return fmt.Errorf("failed to inspect collection %q: %w", collectionName, infoErr)
+		}
+		if size := info.GetConfig().GetParams().GetVectorsConfig().GetParams().GetSize(); size != 0 && size != uint64(vectorSize) {
+			return fmt.Errorf("collection %q has vector size %d, expected %d", collectionName, size, vectorSize)
+		}
 		return nil
 	}
 
@@ -97,4 +104,38 @@ func EnsureCollection(vectorSize int) error {
 // SearchPerformer returns the Qdrant client for performing searches.
 func SearchPerformer() (*qdrant.Client, error) {
 	return GetClient()
+}
+
+// Health checks that the Qdrant server is reachable.
+func Health(ctx context.Context) error {
+	c, err := GetClient()
+	if err != nil {
+		return err
+	}
+	_, err = c.CollectionExists(ctx, config.QdrantCollection())
+	return err
+}
+
+// DeletePointsByURL removes every point whose payload "url" matches articleURL.
+// It is used to clear stale chunks before re-ingesting a page.
+func DeletePointsByURL(ctx context.Context, articleURL string) error {
+	c, err := GetClient()
+	if err != nil {
+		return err
+	}
+
+	filter := &qdrant.Filter{
+		Must: []*qdrant.Condition{qdrant.NewMatchKeyword("url", articleURL)},
+	}
+
+	_, err = c.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: config.QdrantCollection(),
+		Points: &qdrant.PointsSelector{
+			PointsSelectorOneOf: &qdrant.PointsSelector_Filter{Filter: filter},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("qdrant delete failed: %w", err)
+	}
+	return nil
 }

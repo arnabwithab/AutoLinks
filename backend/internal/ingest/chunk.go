@@ -5,6 +5,10 @@ import (
 	"strings"
 )
 
+// maxSentenceRunes caps a single sentence so pages without punctuation do not
+// collapse into one chunk the embedding model silently truncates.
+const maxSentenceRunes = 1200
+
 // ChunkText splits text into overlapping chunks of ~sentencesPerChunk sentences each.
 func ChunkText(text string, sentencesPerChunk int) []string {
 	sentences := splitSentences(text)
@@ -37,6 +41,12 @@ func splitSentences(text string) []string {
 	for i := 0; i < len(runes); i++ {
 		ch := runes[i]
 		current = append(current, ch)
+
+		if len(current) >= maxSentenceRunes && (ch == ' ' || ch == '\n' || ch == '\t') {
+			sentences = append(sentences, strings.TrimSpace(string(current)))
+			current = nil
+			continue
+		}
 
 		if ch == '.' || ch == '!' || ch == '?' {
 			if i+1 < len(runes) && (runes[i+1] == ' ' || runes[i+1] == '\n' || runes[i+1] == '\t') {

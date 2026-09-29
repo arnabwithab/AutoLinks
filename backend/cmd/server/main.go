@@ -23,24 +23,38 @@ import (
 func main() {
 	logger.Info("Starting %s", config.AppName())
 
-	if err := qdrant.EnsureCollection(384); err != nil {
-		logger.Fatal("Failed to ensure Qdrant collection: %s", err)
+	var qErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if qErr = qdrant.EnsureCollection(384); qErr == nil {
+			break
+		}
+		logger.Warning("Qdrant not ready (attempt %d/3): %s", attempt, qErr)
+		time.Sleep(time.Duration(attempt) * 2 * time.Second)
+	}
+	if qErr != nil {
+		logger.Fatal("Failed to ensure Qdrant collection: %s", qErr)
 	}
 
 	rerank.RestoreLinkGraph()
 
 	handlers.WorkerPool = jobs.NewWorkerPool()
+	if n := jobs.ReconcileJobs(handlers.WorkerPool); n > 0 {
+		logger.Info("Re-enqueued %d pending jobs from Redis", n)
+	}
 
 	var tokenVerifier auth.TokenVerifier
-	if sk := config.ClerkSecretKey(); sk != "" {
-		cl, err := clerk.NewClient(sk)
+	switch {
+	case config.ClerkSecretKey() != "":
+		cl, err := clerk.NewClient(config.ClerkSecretKey())
 		if err != nil {
 			logger.Fatal("Failed to create Clerk client: %s", err)
 		}
 		tokenVerifier = cl
 		logger.Info("Clerk auth enabled")
-	} else {
-		logger.Warning("CLERK_SECRET_KEY not set — auth disabled")
+	case config.AuthDisabled():
+		logger.Warning("AUTH_DISABLED=true — auth is OFF; all endpoints are publicly accessible")
+	default:
+		logger.Fatal("CLERK_SECRET_KEY is not set; set it to enable auth, or set AUTH_DISABLED=true to explicitly run without auth")
 	}
 
 	if config.Debug() {
@@ -82,6 +96,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("Server forced to shutdown: %s", err)
 	}
+
+	handlers.WorkerPool.Stop()
 
 	logger.Info("Server stopped")
 }

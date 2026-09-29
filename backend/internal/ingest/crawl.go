@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/xml"
 	"fmt"
-	"io"
+	htmlesc "html"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -19,17 +19,23 @@ import (
 	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/arnabwithab/AutoLinks/backend/internal/qdrant"
 	qdrantpb "github.com/qdrant/go-client/qdrant"
-	"golang.org/x/sync/semaphore"
 )
 
-var hrefRE = regexp.MustCompile(`<a\s+[^>]*href=["']([^"']+)["'][^>]*>`)
-var tagRE = regexp.MustCompile(`<[^>]*>`)
-var spaceRE = regexp.MustCompile(`\s+`)
+var (
+	hrefRE   = regexp.MustCompile(`(?is)<a\s+[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	tagRE    = regexp.MustCompile(`<[^>]*>`)
+	spaceRE  = regexp.MustCompile(`\s+`)
+	noiseRE  = regexp.MustCompile(`(?is)<(script|style|noscript|template|head|nav|footer|svg)[^>]*>.*?</(?:script|style|noscript|template|head|nav|footer|svg)>`)
+	commentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
+)
 
-// PageData holds extracted page content and outbound links.
+const (
+	maxSitemapDepth = 5
+	maxSitemapURLs  = 50000
+)
+
+// PageData holds links extracted from a crawled page.
 type PageData struct {
-	Text          string
-	HTML          string
 	OutboundLinks []string
 }
 
@@ -37,6 +43,8 @@ type PageData struct {
 type PageMap map[string]*PageData
 
 // NormalizeURL normalizes URLs so sitemap entries and extracted links compare consistently.
+// Query strings are intentionally dropped so tracking params and pagination collapse to the
+// canonical path; this keeps the link graph stable but merges ?page=2 into its base page.
 func NormalizeURL(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -69,6 +77,15 @@ func ExtractInternalLinks(htmlStr, baseURL string) []string {
 	matches := hrefRE.FindAllStringSubmatch(htmlStr, -1)
 	for _, match := range matches {
 		href := match[1]
+		if href == "" {
+			href = match[2]
+		}
+		if href == "" {
+			href = match[3]
+		}
+		if href == "" {
+			continue
+		}
 		fullURL, err := resolveURL(baseURL, href)
 		if err != nil {
 			continue
@@ -114,15 +131,17 @@ func resolveURL(base, ref string) (string, error) {
 }
 
 func extractTextFromHTML(htmlStr string) string {
-	text := tagRE.ReplaceAllString(htmlStr, " ")
+	text := commentRE.ReplaceAllString(htmlStr, " ")
+	text = noiseRE.ReplaceAllString(text, " ")
+	text = tagRE.ReplaceAllString(text, " ")
+	text = htmlesc.UnescapeString(text)
 	text = spaceRE.ReplaceAllString(text, " ")
 	return strings.TrimSpace(text)
 }
 
 // FetchAndExtract fetches a URL, returns normalized URL, text, html, and error.
 func FetchAndExtract(rawURL string) (string, string, string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(rawURL)
+	resp, err := safeGet(rawURL)
 	if err != nil {
 		return NormalizeURL(rawURL), "", "", fmt.Errorf("fetch failed: %w", err)
 	}
@@ -132,7 +151,7 @@ func FetchAndExtract(rawURL string) (string, string, string, error) {
 		return NormalizeURL(rawURL), "", "", fmt.Errorf("fetch returned %d", resp.StatusCode)
 	}
 
-	htmlBytes, err := io.ReadAll(resp.Body)
+	htmlBytes, err := readLimited(resp.Body)
 	if err != nil {
 		return NormalizeURL(rawURL), "", "", fmt.Errorf("read body failed: %w", err)
 	}
@@ -146,75 +165,35 @@ func FetchAndExtract(rawURL string) (string, string, string, error) {
 	return NormalizeURL(rawURL), text, htmlStr, nil
 }
 
-// FetchAndExtractConcurrent fetches URL and extracts text with semaphore-bounded concurrency.
-func FetchAndExtractConcurrent(rawURL string, sem *semaphore.Weighted) (normalizedURL string, text string, html string, err error) {
-	ctx := context.Background()
-	if err := sem.Acquire(ctx, 1); err != nil {
-		return NormalizeURL(rawURL), "", "", fmt.Errorf("semaphore acquire: %w", err)
-	}
-	defer sem.Release(1)
-
-	return FetchAndExtract(rawURL)
-}
-
-// CrawlAndExtractBulk crawls URLs concurrently and returns extracted text plus internal links.
-func CrawlAndExtractBulk(urls []string, maxConcurrent int64) PageMap {
-	sem := semaphore.NewWeighted(maxConcurrent)
-	results := make(PageMap)
-
-	type result struct {
-		url  string
-		data *PageData
-	}
-
-	ch := make(chan result, len(urls))
-
-	for _, rawURL := range urls {
-		go func(u string) {
-			normalizedURL, text, html, err := FetchAndExtractConcurrent(u, sem)
-			if err != nil {
-				logger.Warning("Failed to fetch %s: %s", u, err)
-				ch <- result{url: normalizedURL}
-				return
-			}
-			if text == "" {
-				ch <- result{url: normalizedURL}
-				return
-			}
-
-			links := ExtractInternalLinks(html, normalizedURL)
-			ch <- result{
-				url: normalizedURL,
-				data: &PageData{
-					Text:          text,
-					HTML:          html,
-					OutboundLinks: links,
-				},
-			}
-		}(rawURL)
-	}
-
-	for i := 0; i < len(urls); i++ {
-		r := <-ch
-		if r.data != nil {
-			results[r.url] = r.data
-		}
-	}
-
-	return results
-}
-
-// ParseSitemap parses a sitemap XML and extracts all article URLs.
+// ParseSitemap parses a sitemap XML (including sitemap indexes) and extracts all article URLs.
 func ParseSitemap(sitemapURL string) []string {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(sitemapURL)
+	return parseSitemap(sitemapURL, 0, map[string]bool{})
+}
+
+func parseSitemap(sitemapURL string, depth int, visited map[string]bool) []string {
+	if depth > maxSitemapDepth {
+		logger.Warning("Sitemap recursion depth exceeded at %s", sitemapURL)
+		return nil
+	}
+	if visited[sitemapURL] {
+		logger.Warning("Skipping already-visited sitemap %s", sitemapURL)
+		return nil
+	}
+	visited[sitemapURL] = true
+
+	resp, err := safeGet(sitemapURL)
 	if err != nil {
 		logger.Error("Sitemap parse error: %s", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		logger.Error("Sitemap returned %d for %s", resp.StatusCode, sitemapURL)
+		return nil
+	}
+
+	body, err := readLimited(resp.Body)
 	if err != nil {
 		logger.Error("Sitemap read error: %s", err)
 		return nil
@@ -238,8 +217,10 @@ func ParseSitemap(sitemapURL string) []string {
 	if err := xml.Unmarshal(body, &index); err == nil && len(index.Sitemaps) > 0 {
 		var allURLs []string
 		for _, sm := range index.Sitemaps {
-			urls := ParseSitemap(sm.Loc)
-			allURLs = append(allURLs, urls...)
+			if sm.Loc == "" || len(allURLs) >= maxSitemapURLs {
+				continue
+			}
+			allURLs = append(allURLs, parseSitemap(sm.Loc, depth+1, visited)...)
 		}
 		return allURLs
 	}
@@ -252,8 +233,13 @@ func ParseSitemap(sitemapURL string) []string {
 
 	var urls []string
 	for _, u := range urlSet.URLs {
-		if u.Loc != "" {
-			urls = append(urls, u.Loc)
+		if u.Loc == "" {
+			continue
+		}
+		urls = append(urls, u.Loc)
+		if len(urls) >= maxSitemapURLs {
+			logger.Warning("Sitemap URL cap reached (%d)", maxSitemapURLs)
+			break
 		}
 	}
 	return urls
@@ -298,6 +284,10 @@ func UpsertChunks(articleURL string, chunks []string, embeddings [][]float64) er
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if err := qdrant.DeletePointsByURL(ctx, articleURL); err != nil {
+		return fmt.Errorf("failed to clear stale points for %s: %w", articleURL, err)
+	}
+
 	req := &qdrantpb.UpsertPoints{
 		CollectionName: collectionName,
 		Points:         points,
@@ -312,48 +302,52 @@ func UpsertChunks(articleURL string, chunks []string, embeddings [][]float64) er
 }
 
 // IngestArticle chunks text, generates embeddings, and upserts to Qdrant.
-func IngestArticle(rawURL string, text string) error {
+// It returns the number of chunks ingested.
+func IngestArticle(rawURL string, text string) (int, error) {
 	normalizedURL := NormalizeURL(rawURL)
 
 	chunks := ChunkText(text, 5)
 	if len(chunks) == 0 {
 		logger.Warning("No chunks generated for %s", normalizedURL)
-		return nil
+		return 0, nil
 	}
 
 	embeddings, err := embed.EmbedBatch(chunks)
 	if err != nil {
-		return fmt.Errorf("embed batch failed: %w", err)
+		return 0, fmt.Errorf("embed batch failed: %w", err)
+	}
+	if len(embeddings) != len(chunks) {
+		return 0, fmt.Errorf("embedding count mismatch: got %d embeddings for %d chunks", len(embeddings), len(chunks))
 	}
 
-	err = UpsertChunks(normalizedURL, chunks, embeddings)
-	if err != nil {
-		return fmt.Errorf("upsert failed: %w", err)
+	if err := UpsertChunks(normalizedURL, chunks, embeddings); err != nil {
+		return 0, fmt.Errorf("upsert failed: %w", err)
 	}
 
 	logger.Info("Ingested %d chunks for %s", len(chunks), normalizedURL)
-	return nil
+	return len(chunks), nil
 }
 
 // StreamFetchEmbedUpsert fetches a single page, embeds it, and upserts to Qdrant.
-// Returns the page's outbound internal links (for link graph building),
-// or nil if the page could not be processed.
-func StreamFetchEmbedUpsert(rawURL string) []string {
-	normalizedURL, text, html, err := FetchAndExtract(rawURL)
-	if err != nil || text == "" {
-		if err != nil {
-			logger.Warning("Failed to stream ingest %s: %s", rawURL, err)
-		}
-		return nil
+// Returns the page's outbound internal links (for link graph building) and an error
+// if the page could not be processed.
+func StreamFetchEmbedUpsert(rawURL string) ([]string, error) {
+	normalizedURL, text, htmlStr, err := FetchAndExtract(rawURL)
+	if err != nil {
+		logger.Warning("Failed to stream ingest %s: %s", rawURL, err)
+		return nil, err
+	}
+	if text == "" {
+		return nil, fmt.Errorf("no text extracted")
 	}
 
-	outboundLinks := ExtractInternalLinks(html, normalizedURL)
+	outboundLinks := ExtractInternalLinks(htmlStr, normalizedURL)
 
-	if err := IngestArticle(normalizedURL, text); err != nil {
+	if _, err := IngestArticle(normalizedURL, text); err != nil {
 		logger.Warning("Failed to stream ingest %s: %s", rawURL, err)
-		return nil
+		return nil, err
 	}
 
 	logger.Info("Stream ingested %s", normalizedURL)
-	return outboundLinks
+	return outboundLinks, nil
 }

@@ -13,7 +13,6 @@ require (
 	github.com/qdrant/go-client v1.18.3
 	github.com/redis/go-redis/v9 v9.10.0
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sync v0.20.0
 )
 
 require (

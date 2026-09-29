@@ -4,6 +4,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -18,6 +19,10 @@ const (
 	jobNamespace = "autolinks:job"
 	jobTTL       = 86400 * 7 // 7 days
 )
+
+// ErrNotConfigured is returned when Redis has not been configured at all.
+// It is distinguishable from a transient Redis failure (connection error).
+var ErrNotConfigured = errors.New("redis not configured")
 
 var (
 	rdb     *redis.Client
@@ -59,7 +64,7 @@ type Job struct {
 func CreateJob(taskName string, args map[string]interface{}) (string, error) {
 	rds := getRedis()
 	if rds == nil {
-		return "", fmt.Errorf("redis not configured")
+		return "", ErrNotConfigured
 	}
 
 	jobID := uuid.New().String()
@@ -96,7 +101,7 @@ func CreateJob(taskName string, args map[string]interface{}) (string, error) {
 func GetJob(jobID string) (*Job, error) {
 	rds := getRedis()
 	if rds == nil {
-		return nil, fmt.Errorf("redis not configured")
+		return nil, ErrNotConfigured
 	}
 
 	ctx := context.Background()
@@ -117,11 +122,13 @@ func GetJob(jobID string) (*Job, error) {
 	return &job, nil
 }
 
-// UpdateJob atomically updates fields on a job.
+// UpdateJob updates fields on a job. It is a read-modify-write, not atomic —
+// safe only while a single worker owns a given job. Use WATCH/Lua if a second
+// writer is ever introduced.
 func UpdateJob(jobID string, updates map[string]interface{}) error {
 	rds := getRedis()
 	if rds == nil {
-		return fmt.Errorf("redis not configured")
+		return ErrNotConfigured
 	}
 
 	ctx := context.Background()
@@ -153,11 +160,60 @@ func UpdateJob(jobID string, updates map[string]interface{}) error {
 	return nil
 }
 
+// PendingJobs returns jobs left in a non-terminal state (queued, processing, retrying).
+func PendingJobs() ([]*Job, error) {
+	rds := getRedis()
+	if rds == nil {
+		return nil, ErrNotConfigured
+	}
+
+	ctx := context.Background()
+	var cursor uint64
+	var pending []*Job
+
+	for {
+		keys, next, err := rds.Scan(ctx, cursor, jobNamespace+":*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan jobs: %w", err)
+		}
+		for _, key := range keys {
+			raw, getErr := rds.Get(ctx, key).Result()
+			if getErr != nil {
+				continue
+			}
+			var job Job
+			if json.Unmarshal([]byte(raw), &job) != nil {
+				continue
+			}
+			switch job.Status {
+			case "queued", "processing", "retrying":
+				jobCopy := job
+				pending = append(pending, &jobCopy)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return pending, nil
+}
+
+// Health pings Redis and returns an error if it is unreachable.
+func Health(ctx context.Context) error {
+	rds := getRedis()
+	if rds == nil {
+		return ErrNotConfigured
+	}
+	return rds.Ping(ctx).Err()
+}
+
 // AddJobError appends an error to a job's error list.
 func AddJobError(jobID string, errorMsg string) error {
 	rds := getRedis()
 	if rds == nil {
-		return fmt.Errorf("redis not configured")
+		return ErrNotConfigured
 	}
 
 	ctx := context.Background()

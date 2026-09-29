@@ -2,10 +2,12 @@
 package models
 
 // RecommendRequest is the request body for /recommend.
+// Alpha and MinSimilarity are pointers so an explicit 0 is distinguishable
+// from an omitted field.
 type RecommendRequest struct {
-	Text          string  `json:"text"`
-	Alpha         float64 `json:"alpha"`
-	MinSimilarity float64 `json:"min_similarity"`
+	Text          string   `json:"text"`
+	Alpha         *float64 `json:"alpha"`
+	MinSimilarity *float64 `json:"min_similarity"`
 }
 
 // IngestRequest is the request body for /ingest.
@@ -46,9 +48,8 @@ type IngestResponse struct {
 
 // IngestSitemapAsyncResponse is the response for async /ingest/sitemap.
 type IngestSitemapAsyncResponse struct {
-	JobID             string `json:"job_id"`
-	Status            string `json:"status"`
-	EstimatedArticles int    `json:"estimated_articles"`
+	JobID  string `json:"job_id"`
+	Status string `json:"status"`
 }
 
 // JobStatusResponse is the response for /ingest/status/{job_id}.
@@ -76,8 +77,10 @@ type RetryDeadResponse struct {
 
 // HealthResponse is the response for /health.
 type HealthResponse struct {
-	Status      string `json:"status"`
-	ModelLoaded bool   `json:"model_loaded"`
+	Status string `json:"status"`
+	Qdrant string `json:"qdrant"`
+	Redis  string `json:"redis"`
+	Models string `json:"models"`
 }
 
 // LinkGraphResponse is the response for /link-graph.
