@@ -49,12 +49,6 @@ export const useStore = create((set) => ({
     error: null,
     activeCardId: null,
   }),
-
-  clearRecommendations: () => set({
-    recommendations: [],
-    latency: null,
-    activeCardId: null
-  })
 }))
 
 if (typeof window !== 'undefined') {

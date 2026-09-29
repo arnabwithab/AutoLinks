@@ -20,7 +20,6 @@ var (
 	linkGraph     map[string]int
 	linkGraphMu   sync.RWMutex
 	rerankRdb     *redis.Client
-	rerankRdbErr  error
 	rerankRdbOnce sync.Once
 )
 
@@ -108,7 +107,6 @@ func getRedisClient() *redis.Client {
 		opts, err := redis.ParseURL(redisURL)
 		if err != nil {
 			logger.Error("Failed to parse Redis URL: %s", err)
-			rerankRdbErr = err
 			return
 		}
 		rerankRdb = redis.NewClient(opts)
@@ -143,7 +141,7 @@ func CollapseCandidatesByURL(candidates []Candidate) []Candidate {
 		}
 	}
 
-	var result []Candidate
+	result := make([]Candidate, 0, len(bestByURL))
 	for _, c := range bestByURL {
 		result = append(result, c)
 	}

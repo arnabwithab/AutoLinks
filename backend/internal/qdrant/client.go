@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +36,9 @@ func GetClient() (*qdrant.Client, error) {
 		host := parsed.Hostname()
 		port := 6334
 		if p := parsed.Port(); p != "" {
-			fmt.Sscanf(p, "%d", &port)
+			if parsedPort, convErr := strconv.Atoi(p); convErr == nil {
+				port = parsedPort
+			}
 		}
 
 		useTLS := parsed.Scheme == "https" || strings.Contains(host, "cloud.qdrant.io")
@@ -59,7 +62,7 @@ func GetClient() (*qdrant.Client, error) {
 }
 
 // EnsureCollection creates the articles collection if it doesn't exist.
-func EnsureCollection(vectorSize int) error {
+func EnsureCollection(vectorSize uint64) error {
 	c, err := GetClient()
 	if err != nil {
 		return err
@@ -79,7 +82,7 @@ func EnsureCollection(vectorSize int) error {
 		if infoErr != nil {
 			return fmt.Errorf("failed to inspect collection %q: %w", collectionName, infoErr)
 		}
-		if size := info.GetConfig().GetParams().GetVectorsConfig().GetParams().GetSize(); size != 0 && size != uint64(vectorSize) {
+		if size := info.GetConfig().GetParams().GetVectorsConfig().GetParams().GetSize(); size != 0 && size != vectorSize {
 			return fmt.Errorf("collection %q has vector size %d, expected %d", collectionName, size, vectorSize)
 		}
 		return nil
@@ -88,7 +91,7 @@ func EnsureCollection(vectorSize int) error {
 	createReq := &qdrant.CreateCollection{
 		CollectionName: collectionName,
 		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
-			Size:     uint64(vectorSize),
+			Size:     vectorSize,
 			Distance: qdrant.Distance_Cosine,
 		}),
 	}
@@ -99,11 +102,6 @@ func EnsureCollection(vectorSize int) error {
 
 	logger.Info("Created collection: %s", collectionName)
 	return nil
-}
-
-// SearchPerformer returns the Qdrant client for performing searches.
-func SearchPerformer() (*qdrant.Client, error) {
-	return GetClient()
 }
 
 // Health checks that the Qdrant server is reachable.

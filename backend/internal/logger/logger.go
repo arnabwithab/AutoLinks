@@ -11,10 +11,9 @@ import (
 )
 
 var (
-	logDir  string
-	logFile *os.File
-	mu      sync.Mutex
-	l       *log.Logger
+	logDir string
+	mu     sync.Mutex
+	l      *log.Logger
 )
 
 func init() {
@@ -28,7 +27,6 @@ func init() {
 	if err != nil {
 		log.Fatalf("failed to open log file: %v", err)
 	}
-	logFile = f
 	l = log.New(f, "", 0)
 }
 

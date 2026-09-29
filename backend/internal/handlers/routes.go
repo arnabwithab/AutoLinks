@@ -158,7 +158,7 @@ func truncateRunes(s string, n int) string {
 	return string(runes[:n])
 }
 
-func handleRecommend(w http.ResponseWriter, r *http.Request) {
+func handleRecommend(w http.ResponseWriter, r *http.Request) { //nolint:gocyclo // request orchestration is inherently branchy
 	var req models.RecommendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")

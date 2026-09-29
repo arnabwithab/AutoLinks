@@ -27,7 +27,6 @@ var ErrNotConfigured = errors.New("redis not configured")
 var (
 	rdb     *redis.Client
 	rdbOnce sync.Once
-	rdbErr  error
 )
 
 func getRedis() *redis.Client {
@@ -39,7 +38,6 @@ func getRedis() *redis.Client {
 		opts, err := redis.ParseURL(redisURL)
 		if err != nil {
 			logger.Error("Failed to parse Redis URL: %s", err)
-			rdbErr = err
 			return
 		}
 		rdb = redis.NewClient(opts)

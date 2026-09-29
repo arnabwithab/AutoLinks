@@ -20,8 +20,8 @@ type SearchResult struct {
 }
 
 // SearchSimilar searches Qdrant for semantically similar article chunks.
-func SearchSimilar(queryEmbedding []float64, limit int, minScore float64) ([]SearchResult, error) {
-	client, err := qdrant.SearchPerformer()
+func SearchSimilar(queryEmbedding []float64, limit uint64, minScore float64) ([]SearchResult, error) {
+	client, err := qdrant.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get qdrant client: %w", err)
 	}
@@ -33,13 +33,12 @@ func SearchSimilar(queryEmbedding []float64, limit int, minScore float64) ([]Sea
 		vector32[i] = float32(v)
 	}
 
-	limit64 := uint64(limit)
 	scoreThreshold := float32(minScore)
 
 	req := &qdrantpb.QueryPoints{
 		CollectionName: collectionName,
 		Query:          qdrantpb.NewQuery(vector32...),
-		Limit:          &limit64,
+		Limit:          &limit,
 		ScoreThreshold: &scoreThreshold,
 		WithPayload:    qdrantpb.NewWithPayload(true),
 	}

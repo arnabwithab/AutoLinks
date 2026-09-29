@@ -8,7 +8,7 @@ import (
 )
 
 // BuildLinkGraph builds inbound link counts by inverting each page's outbound internal links.
-func BuildLinkGraph(crawledPages PageMap) map[string]int {
+func BuildLinkGraph(crawledPages PageMap) map[string]int { //nolint:gocyclo // graph diagnostics logging inflates complexity
 	graph := make(map[string]int, len(crawledPages))
 	for url := range crawledPages {
 		graph[NormalizeURL(url)] = 0

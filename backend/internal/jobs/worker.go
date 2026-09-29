@@ -146,7 +146,7 @@ func (wp *WorkerPool) processJobWithRetry(job *Job) {
 	}
 }
 
-func (wp *WorkerPool) processJob(job *Job) error {
+func (wp *WorkerPool) processJob(job *Job) error { //nolint:gocyclo // job orchestration is inherently branchy
 	if uErr := UpdateJob(job.JobID, map[string]interface{}{"status": "processing"}); uErr != nil {
 		logger.Error("Failed to update job %s status to processing: %s", job.JobID, uErr)
 	}

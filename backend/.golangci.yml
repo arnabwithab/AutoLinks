@@ -1,38 +1,56 @@
+version: "2"
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
     - bodyclose
-    - gosec
-    - revive
-    - misspell
     - gocritic
     - gocyclo
+    - gosec
+    - misspell
     - prealloc
+    - revive
     - unconvert
     - wastedassign
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-  revive:
+  settings:
+    gocyclo:
+      min-complexity: 15
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: increment-decrement
+        - name: range
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-        severity: warning
-        disabled: false
-      - name: blank-imports
-      - name: context-as-argument
-      - name: error-strings
-      - name: error-naming
-      - name: receiver-naming
-      - name: increment-decrement
-      - name: range
-
-issues:
-  exclude-dirs:
-    - vendor
-    - eval
+      # Exported names like extract.ExtractEntities are required by AGENTS.md.
+      - linters:
+          - revive
+        text: stutters
+      # Test helpers routinely ignore encode/decode return values.
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - vendor
+      - eval
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

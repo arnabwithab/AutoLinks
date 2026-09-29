@@ -28,6 +28,12 @@ jobs:
         run: go fmt ./... && git diff --exit-code
         working-directory: backend
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.14.0
+          working-directory: backend
+
   frontend:
     runs-on: ubuntu-latest
     steps:
