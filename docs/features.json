@@ -2,8 +2,8 @@
   "project": "AutoLinks",
   "last_updated": "2026-09-29",
   "summary": {
-    "total": 29,
-    "completed": 29,
+    "total": 34,
+    "completed": 34,
     "in_progress": 0,
     "planned": 0,
     "tests_passing": 66,
@@ -637,6 +637,110 @@
         "Adopt go-trafilatura for article text (regex fallback) and goquery for internal links; bounded sitemap recursion"
       ],
       "notes": "Addresses the adversarial review findings. Corrects false claims across docs and features.json.",
+      "added": "2026-09-29",
+      "completed": "2026-09-29"
+    },
+    {
+      "id": "F030",
+      "name": "Stream-backed ingest queue",
+      "description": "Redis Streams + consumer group replaces the in-process channel; API enqueues, workers claim with lease-token CAS, idle orphans reclaimed and re-run.",
+      "status": "completed",
+      "priority": "high",
+      "module": "backend/internal/jobs/queue.go, backend/internal/jobs/worker.go",
+      "design_doc": "docs/distributed-design.md",
+      "tests": {
+        "status": "completed",
+        "files": [
+          "backend/internal/jobs/queue_test.go"
+        ],
+        "notes": "Branch feat/distributed-system; main deployment untouched."
+      },
+      "subtasks": [],
+      "notes": "",
+      "added": "2026-09-29",
+      "completed": "2026-09-29"
+    },
+    {
+      "id": "F031",
+      "name": "Idempotent submit + atomic job writes",
+      "description": "Sitemap fingerprint dedup, trace IDs, WATCH-based atomic updates and progress increments safe for concurrent writers.",
+      "status": "completed",
+      "priority": "high",
+      "module": "backend/internal/jobs/fingerprint.go, backend/internal/jobs/manager.go",
+      "design_doc": "docs/distributed-design.md",
+      "tests": {
+        "status": "completed",
+        "files": [
+          "backend/internal/jobs/fingerprint_test.go",
+          "backend/internal/jobs/atomic_test.go"
+        ],
+        "notes": "Branch feat/distributed-system; main deployment untouched."
+      },
+      "subtasks": [],
+      "notes": "",
+      "added": "2026-09-29",
+      "completed": "2026-09-29"
+    },
+    {
+      "id": "F032",
+      "name": "Distributed link graph",
+      "description": "Hash-per-URL atomic merges, pub/sub invalidation, minute-TTL local cache on the recommend path.",
+      "status": "completed",
+      "priority": "high",
+      "module": "backend/internal/rerank/rerank.go",
+      "design_doc": "docs/distributed-design.md",
+      "tests": {
+        "status": "completed",
+        "files": [
+          "backend/internal/rerank/distributed_test.go"
+        ],
+        "notes": "Branch feat/distributed-system; main deployment untouched."
+      },
+      "subtasks": [],
+      "notes": "",
+      "added": "2026-09-29",
+      "completed": "2026-09-29"
+    },
+    {
+      "id": "F033",
+      "name": "Split api/worker binaries + deploy split",
+      "description": "cmd/api and cmd/worker share internal/boot; liveness vs readiness endpoints; one image with role command; Terraform VPC/ALB/ECS/ECR/ElastiCache/secrets/scaling.",
+      "status": "completed",
+      "priority": "high",
+      "module": "backend/cmd/api/main.go, backend/cmd/worker/main.go, infra/",
+      "design_doc": "docs/distributed-design.md",
+      "tests": {
+        "status": "completed",
+        "files": [
+          "backend/internal/handlers/routes_test.go",
+          "backend/internal/trace/trace_test.go",
+          "backend/internal/infer/client_test.go"
+        ],
+        "notes": "Branch feat/distributed-system; main deployment untouched."
+      },
+      "subtasks": [],
+      "notes": "",
+      "added": "2026-09-29",
+      "completed": "2026-09-29"
+    },
+    {
+      "id": "F034",
+      "name": "Swappable inference backend",
+      "description": "InferenceClient interface (HF Space today, SageMaker stub behind MODELS_BACKEND) plus JSON stdout logs with trace propagation.",
+      "status": "completed",
+      "priority": "high",
+      "module": "backend/internal/infer/client.go, backend/internal/trace/trace.go",
+      "design_doc": "docs/distributed-design.md",
+      "tests": {
+        "status": "completed",
+        "files": [
+          "backend/internal/infer/client_test.go",
+          "backend/internal/trace/trace_test.go"
+        ],
+        "notes": "Branch feat/distributed-system; main deployment untouched."
+      },
+      "subtasks": [],
+      "notes": "",
       "added": "2026-09-29",
       "completed": "2026-09-29"
     }
