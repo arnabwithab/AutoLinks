@@ -201,8 +201,8 @@ curl -X POST "http://127.0.0.1:8000/api/v1/ingest/sitemap" \
 ### Notes
 
 - The crawl runs asynchronously; poll `/api/v1/ingest/status/{jobID}` for progress. This endpoint returns immediately with a `job_id`.
-- The crawler strips scripts, styles, navigation, and footer boilerplate, then converts the remaining HTML to text.
-- The same crawl also extracts internal `<a href>` links from page HTML.
+- Article text is extracted with `go-trafilatura` (regex fallback when it yields nothing).
+- The same crawl parses internal `<a href>` links with `goquery`.
 - Those links are inverted into inbound link counts and merged into the existing graph used by the equity-aware reranker.
 
 ---

@@ -572,7 +572,7 @@
     {
       "id": "F028",
       "name": "Go Backend Migration",
-      "description": "Rewrite the entire backend from Python/FastAPI to Go/chi. Replace Celery with an in-process goroutine worker pool. Replace trafilatura with built-in HTML noise stripping. Remove local sentence-transformers fallback. Rewrite the test suite and eval scripts in Go.",
+      "description": "Rewrite the entire backend from Python/FastAPI to Go/chi. Replace Celery with an in-process goroutine worker pool. Adopt go-trafilatura + goquery for content and link extraction. Remove local sentence-transformers fallback. Rewrite the test suite and eval scripts in Go.",
       "status": "completed",
       "priority": "high",
       "module": "backend/cmd/server/main.go, backend/internal/*.go, backend/eval/*/main.go, backend/Dockerfile",
@@ -634,7 +634,7 @@
         "Delete stale Qdrant points before re-ingest; validate collection dimension",
         "Explicit alpha/min_similarity (incl. 0) with range validation",
         "Real health checks, per-IP rate limit, infra errors -> 503 not 404",
-        "Strip script/style/nav noise; bounded sitemap recursion"
+        "Adopt go-trafilatura for article text (regex fallback) and goquery for internal links; bounded sitemap recursion"
       ],
       "notes": "Addresses the adversarial review findings. Corrects false claims across docs and features.json.",
       "added": "2026-09-29",

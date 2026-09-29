@@ -14,15 +14,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/arnabwithab/AutoLinks/backend/internal/config"
 	"github.com/arnabwithab/AutoLinks/backend/internal/embed"
 	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/arnabwithab/AutoLinks/backend/internal/qdrant"
+	trafilatura "github.com/markusmobius/go-trafilatura"
 	qdrantpb "github.com/qdrant/go-client/qdrant"
 )
 
 var (
-	hrefRE    = regexp.MustCompile(`(?is)<a\s+[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
 	tagRE     = regexp.MustCompile(`<[^>]*>`)
 	spaceRE   = regexp.MustCompile(`\s+`)
 	noiseRE   = regexp.MustCompile(`(?is)<(script|style|noscript|template|head|nav|footer|svg)[^>]*>.*?</(?:script|style|noscript|template|head|nav|footer|svg)>`)
@@ -71,48 +72,44 @@ func ExtractInternalLinks(htmlStr, baseURL string) []string {
 	domain := parsedBase.Host
 	sourceURL := NormalizeURL(baseURL)
 
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlStr))
+	if err != nil {
+		logger.Warning("Failed to parse HTML for link extraction: %s", err)
+		return nil
+	}
+
 	seen := make(map[string]bool)
 	var links []string
 
-	matches := hrefRE.FindAllStringSubmatch(htmlStr, -1)
-	for _, match := range matches {
-		href := match[1]
-		if href == "" {
-			href = match[2]
-		}
-		if href == "" {
-			href = match[3]
-		}
-		if href == "" {
-			continue
-		}
-		fullURL, err := resolveURL(baseURL, href)
-		if err != nil {
-			continue
+	doc.Find("a[href]").Each(func(_ int, sel *goquery.Selection) {
+		href, ok := sel.Attr("href")
+		if !ok || strings.TrimSpace(href) == "" {
+			return
 		}
 
+		fullURL, err := resolveURL(baseURL, href)
+		if err != nil {
+			return
+		}
 		parsedLink, err := url.Parse(fullURL)
 		if err != nil {
-			continue
+			return
 		}
 		if parsedLink.Scheme != "http" && parsedLink.Scheme != "https" {
-			continue
+			return
 		}
 		if parsedLink.Host != domain {
-			continue
+			return
 		}
 
 		normalized := NormalizeURL(fullURL)
-		if normalized == sourceURL {
-			continue
-		}
-		if seen[normalized] {
-			continue
+		if normalized == sourceURL || seen[normalized] {
+			return
 		}
 
 		seen[normalized] = true
 		links = append(links, normalized)
-	}
+	})
 
 	sort.Strings(links)
 	return links
@@ -130,7 +127,38 @@ func resolveURL(base, ref string) (string, error) {
 	return baseURL.ResolveReference(refURL).String(), nil
 }
 
-func extractTextFromHTML(htmlStr string) string {
+// extractTextFromHTML extracts the main article text using go-trafilatura,
+// falling back to a tag-stripping pass when trafilatura yields nothing.
+func extractTextFromHTML(htmlStr, pageURL string) string {
+	if text := trafilaturaText(htmlStr, pageURL); strings.TrimSpace(text) != "" {
+		return strings.TrimSpace(text)
+	}
+	return fallbackText(htmlStr)
+}
+
+func trafilaturaText(htmlStr, pageURL string) string {
+	var originalURL *url.URL
+	if parsed, err := url.Parse(pageURL); err == nil {
+		originalURL = parsed
+	}
+
+	result, err := trafilatura.Extract(strings.NewReader(htmlStr), trafilatura.Options{
+		OriginalURL:     originalURL,
+		ExcludeComments: true,
+		EnableFallback:  true,
+	})
+	if err != nil {
+		logger.Warning("Trafilatura extraction failed for %s: %s", pageURL, err)
+		return ""
+	}
+	if result == nil {
+		return ""
+	}
+	return result.ContentText
+}
+
+// fallbackText is a last-resort tag stripper used only when trafilatura fails.
+func fallbackText(htmlStr string) string {
 	text := commentRE.ReplaceAllString(htmlStr, " ")
 	text = noiseRE.ReplaceAllString(text, " ")
 	text = tagRE.ReplaceAllString(text, " ")
@@ -157,7 +185,7 @@ func FetchAndExtract(rawURL string) (string, string, string, error) {
 	}
 	htmlStr := string(htmlBytes)
 
-	text := extractTextFromHTML(htmlStr)
+	text := extractTextFromHTML(htmlStr, NormalizeURL(rawURL))
 	if text == "" {
 		logger.Warning("No text extracted from %s", rawURL)
 	}

@@ -11,7 +11,7 @@ AutoLinks is a semantic internal-link generation tool for SEO teams and content 
 - State Management: Zustand
 - NER: GLiNER2 via HuggingFace Space (eros483/autolinks-models)
 - Embeddings: all-MiniLM-L6-v2 (384-dim, via HF Space)
-- Content Extraction: built-in HTML stripping (regex) with internal-link extraction
+- Content Extraction: go-trafilatura (article text) + goquery (internal-link parsing)
 - Evaluation Judge: Groq LLM (llama-3.3-70b-versatile)
 
 ## Key Commands
@@ -88,7 +88,7 @@ AutoLinks/
 │   │   │   └── rerank.go        # equity-aware re-ranking + link graph (Redis)
 │   │   ├── ingest/
 │   │   │   ├── chunk.go         # text chunking (sliding window)
-│   │   │   ├── crawl.go         # sitemap crawl + built-in text extraction
+│   │   │   ├── crawl.go         # sitemap crawl + go-trafilatura extraction
 │   │   │   ├── fetch.go         # SSRF-hardened outbound HTTP client
 │   │   │   └── linkgraph.go     # link graph building from internal links
 │   │   ├── jobs/
