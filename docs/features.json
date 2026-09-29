@@ -6,7 +6,7 @@
     "completed": 29,
     "in_progress": 0,
     "planned": 0,
-    "tests_passing": 64,
+    "tests_passing": 66,
     "tests_failing": 0,
     "tests_missing": 5
   },
@@ -588,7 +588,7 @@
           "backend/internal/jobs/manager_test.go",
           "backend/internal/jobs/dlq_test.go"
         ],
-        "notes": "55 Go tests passing across 8 test files. Tests cover entity extraction, embedding, re-ranking, chunking, link graph, handlers, auth, job manager, and DLQ. Uses testify/assert and miniredis for mocking."
+        "notes": "57 Go tests passing across 9 test files. Tests cover entity extraction, embedding, re-ranking, chunking, link graph, crawl/extraction, handlers, auth, job manager, and DLQ. Uses testify/assert and miniredis for mocking."
       },
       "subtasks": [
         "Phase 1: Project scaffold (cmd/server/main.go, config, logger, qdrant client)",
@@ -597,7 +597,7 @@
         "Phase 4: Models (request/response structs)",
         "Phase 5: Jobs (manager, worker pool, DLQ)",
         "Phase 6: HTTP handlers (chi router, all 8 endpoints, CORS, auth)",
-        "Phase 7: Tests (55 passing across 8 test files)",
+        "Phase 7: Tests (55 Go tests at migration; 57 now)",
         "Phase 8: Eval scripts (latency, precision, equity, throughput)",
         "Phase 9: Dockerfile (multi-stage build, alpine runtime)",
         "Phase 10: Documentation (features.json, api.md, deployment.md)",
