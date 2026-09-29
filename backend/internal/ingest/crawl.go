@@ -22,10 +22,10 @@ import (
 )
 
 var (
-	hrefRE   = regexp.MustCompile(`(?is)<a\s+[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
-	tagRE    = regexp.MustCompile(`<[^>]*>`)
-	spaceRE  = regexp.MustCompile(`\s+`)
-	noiseRE  = regexp.MustCompile(`(?is)<(script|style|noscript|template|head|nav|footer|svg)[^>]*>.*?</(?:script|style|noscript|template|head|nav|footer|svg)>`)
+	hrefRE    = regexp.MustCompile(`(?is)<a\s+[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	tagRE     = regexp.MustCompile(`<[^>]*>`)
+	spaceRE   = regexp.MustCompile(`\s+`)
+	noiseRE   = regexp.MustCompile(`(?is)<(script|style|noscript|template|head|nav|footer|svg)[^>]*>.*?</(?:script|style|noscript|template|head|nav|footer|svg)>`)
 	commentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
 )
 
