@@ -16,8 +16,13 @@ import (
 )
 
 const (
-	jobNamespace = "autolinks:job"
-	jobTTL       = 86400 * 7 // 7 days
+	jobNamespace         = "autolinks:job"
+	fingerprintNamespace = "autolinks:fingerprint"
+	jobTTL               = 86400 * 7 // 7 days
+	// ponytail: stream/lease constants live here so queue.go and manager.go share them.
+	streamKey       = "autolinks:ingest:stream"
+	streamGroup     = "autolinks-workers"
+	leaseTTLSeconds = 600 // 10min: reclaims a dead worker's job (§7)
 )
 
 // ErrNotConfigured is returned when Redis has not been configured at all.
@@ -56,6 +61,11 @@ type Job struct {
 	ArticlesDone  int                    `json:"articles_done"`
 	ArticlesTotal int                    `json:"articles_total"`
 	Errors        []string               `json:"errors"`
+	// Distributed fields (§2): omitempty keeps old records readable.
+	Fingerprint    string `json:"fingerprint,omitempty"`
+	TraceID        string `json:"trace_id,omitempty"`
+	LeaseToken     string `json:"lease_token,omitempty"`
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
 }
 
 // CreateJob creates a new job entry in Redis and returns its job_id.
