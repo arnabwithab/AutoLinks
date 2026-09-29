@@ -51,6 +51,7 @@ func main() {
 	} else {
 		handlers.WorkerPool.RunStreamConsumers(streamCtx, 4)
 	}
+	go rerank.StartGraphSubscriber(streamCtx)
 
 	var tokenVerifier auth.TokenVerifier
 	switch {
