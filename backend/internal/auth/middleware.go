@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anomalyco/autolinks/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/clerkinc/clerk-sdk-go/clerk"
 )
 

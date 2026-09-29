@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anomalyco/autolinks/internal/config"
-	"github.com/anomalyco/autolinks/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/config"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )

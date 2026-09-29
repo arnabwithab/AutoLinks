@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anomalyco/autolinks/internal/config"
-	"github.com/anomalyco/autolinks/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/config"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 )
 
 // ErrNoEntities is returned when entity extraction succeeds but finds no entities.

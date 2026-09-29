@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anomalyco/autolinks/internal/auth"
-	"github.com/anomalyco/autolinks/internal/config"
-	"github.com/anomalyco/autolinks/internal/handlers"
-	"github.com/anomalyco/autolinks/internal/jobs"
-	"github.com/anomalyco/autolinks/internal/logger"
-	"github.com/anomalyco/autolinks/internal/qdrant"
-	"github.com/anomalyco/autolinks/internal/rerank"
+	"github.com/arnabwithab/AutoLinks/backend/internal/auth"
+	"github.com/arnabwithab/AutoLinks/backend/internal/config"
+	"github.com/arnabwithab/AutoLinks/backend/internal/handlers"
+	"github.com/arnabwithab/AutoLinks/backend/internal/jobs"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/qdrant"
+	"github.com/arnabwithab/AutoLinks/backend/internal/rerank"
 	"github.com/clerkinc/clerk-sdk-go/clerk"
 )
 

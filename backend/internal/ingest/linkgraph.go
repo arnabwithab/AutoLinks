@@ -4,7 +4,7 @@ package ingest
 import (
 	"sort"
 
-	"github.com/anomalyco/autolinks/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 )
 
 // BuildLinkGraph builds inbound link counts by inverting each page's outbound internal links.

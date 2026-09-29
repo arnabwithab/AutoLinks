@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/anomalyco/autolinks/internal/config"
-	"github.com/anomalyco/autolinks/internal/extract"
-	"github.com/anomalyco/autolinks/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/config"
+	"github.com/arnabwithab/AutoLinks/backend/internal/extract"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 )
 
 // EmbedText generates an embedding vector for a single text.

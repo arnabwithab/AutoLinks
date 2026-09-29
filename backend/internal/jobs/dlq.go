@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anomalyco/autolinks/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 )
 
 const dlqKey = "dlq:ingest"

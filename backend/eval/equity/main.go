@@ -12,7 +12,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/anomalyco/autolinks/internal/config"
+	"github.com/arnabwithab/AutoLinks/backend/internal/config"
 )
 
 var apiBase string

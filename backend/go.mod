@@ -1,4 +1,4 @@
-module github.com/anomalyco/autolinks
+module github.com/arnabwithab/AutoLinks/backend
 
 go 1.25.0
 

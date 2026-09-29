@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anomalyco/autolinks/internal/ingest"
-	"github.com/anomalyco/autolinks/internal/logger"
-	"github.com/anomalyco/autolinks/internal/rerank"
+	"github.com/arnabwithab/AutoLinks/backend/internal/ingest"
+	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
+	"github.com/arnabwithab/AutoLinks/backend/internal/rerank"
 	"golang.org/x/sync/semaphore"
 )
 
