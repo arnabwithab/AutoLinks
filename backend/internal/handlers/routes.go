@@ -70,6 +70,7 @@ func NewRouter(tokenVerifier auth.TokenVerifier) chi.Router {
 
 	r.Get("/", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
+	r.Get("/api/v1/ready", handleReady)
 
 	r.Group(func(r chi.Router) {
 		if tokenVerifier != nil {
@@ -564,6 +565,14 @@ func handleRetryDead(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	// Liveness: the process is up. ALB/ECS restart policy uses this;
+	// dependency gates live in handleReady.
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func handleReady(w http.ResponseWriter, r *http.Request) {
+	// Readiness: can this task serve traffic (ElastiCache, Qdrant reachable)?
+	// ALB routes only to ready tasks (§8); non-200 drains the target.
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 
@@ -587,11 +596,13 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := "ok"
+	code := http.StatusOK
 	if qdrantStatus != "ok" || redisStatus != "ok" {
 		status = "degraded"
+		code = http.StatusServiceUnavailable
 	}
 
-	writeJSON(w, http.StatusOK, models.HealthResponse{
+	writeJSON(w, code, models.HealthResponse{
 		Status: status,
 		Qdrant: qdrantStatus,
 		Redis:  redisStatus,

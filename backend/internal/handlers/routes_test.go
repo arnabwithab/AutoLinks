@@ -26,6 +26,20 @@ func TestHandleHealth(t *testing.T) {
 
 	var resp map[string]interface{}
 	json.NewDecoder(w.Body).Decode(&resp)
+	assert.Equal(t, "ok", resp["status"])
+}
+
+func TestHandleReady(t *testing.T) {
+	router := setupRouter()
+	req := httptest.NewRequest("GET", "/api/v1/ready", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Without Redis/Qdrant in test env this is 503, but the shape is what matters.
+	assert.Contains(t, []int{http.StatusOK, http.StatusServiceUnavailable}, w.Code)
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
 	assert.Contains(t, resp, "status")
 	assert.Contains(t, resp, "qdrant")
 	assert.Contains(t, resp, "redis")
