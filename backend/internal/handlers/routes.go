@@ -46,9 +46,6 @@ const (
 	maxQueueDepth = 200
 )
 
-// WorkerPool is the shared worker pool instance, set by main.go.
-var WorkerPool *jobs.WorkerPool
-
 // NewRouter creates and configures the chi router with all endpoints.
 func NewRouter(tokenVerifier auth.TokenVerifier) chi.Router {
 	r := chi.NewRouter()

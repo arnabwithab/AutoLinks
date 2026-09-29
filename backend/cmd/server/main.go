@@ -7,73 +7,37 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/arnabwithab/AutoLinks/backend/internal/auth"
+	"github.com/arnabwithab/AutoLinks/backend/internal/boot"
 	"github.com/arnabwithab/AutoLinks/backend/internal/config"
 	"github.com/arnabwithab/AutoLinks/backend/internal/handlers"
 	"github.com/arnabwithab/AutoLinks/backend/internal/jobs"
 	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
-	"github.com/arnabwithab/AutoLinks/backend/internal/qdrant"
-	"github.com/arnabwithab/AutoLinks/backend/internal/rerank"
-	"github.com/clerkinc/clerk-sdk-go/clerk"
 )
 
 func main() {
 	logger.Info("Starting %s", config.AppName())
 
-	var qErr error
-	for attempt := 1; attempt <= 3; attempt++ {
-		if qErr = qdrant.EnsureCollection(384); qErr == nil {
-			break
-		}
-		logger.Warning("Qdrant not ready (attempt %d/3): %s", attempt, qErr)
-		time.Sleep(time.Duration(attempt) * 2 * time.Second)
-	}
-	if qErr != nil {
-		logger.Fatal("Failed to ensure Qdrant collection: %s", qErr)
-	}
+	boot.EnsureQdrant()
 
-	rerank.RestoreLinkGraph()
+	streamCtx, stopStreams := context.WithCancel(context.Background())
+	defer stopStreams()
+	boot.InitGraph(streamCtx)
 
-	handlers.WorkerPool = jobs.NewWorkerPool()
-	if n := jobs.ReconcileJobs(handlers.WorkerPool); n > 0 {
+	pool := jobs.NewWorkerPool()
+	if n := jobs.ReconcileJobs(pool); n > 0 {
 		logger.Info("Re-enqueued %d pending jobs from Redis", n)
 	}
 
 	// Distributed slow path (§2): stream consumers share work across replicas.
 	// The in-process pool stays for local fallback; the API enqueues to the stream.
-	streamCtx, stopStreams := context.WithCancel(context.Background())
-	defer stopStreams()
-	if err := jobs.EnsureStreamGroup(streamCtx); err != nil {
-		logger.Warning("Stream group unavailable, ingest will 503: %s", err)
-	} else {
-		handlers.WorkerPool.RunStreamConsumers(streamCtx, 4)
-	}
-	go rerank.StartGraphSubscriber(streamCtx)
+	streamWG := pool.RunStreamConsumers(streamCtx, 4)
 
-	var tokenVerifier auth.TokenVerifier
-	switch {
-	case config.ClerkSecretKey() != "":
-		cl, err := clerk.NewClient(config.ClerkSecretKey())
-		if err != nil {
-			logger.Fatal("Failed to create Clerk client: %s", err)
-		}
-		tokenVerifier = cl
-		logger.Info("Clerk auth enabled")
-	case config.AuthDisabled():
-		logger.Warning("AUTH_DISABLED=true — auth is OFF; all endpoints are publicly accessible")
-	default:
-		logger.Fatal("CLERK_SECRET_KEY is not set; set it to enable auth, or set AUTH_DISABLED=true to explicitly run without auth")
-	}
-
-	if config.Debug() {
-		logger.Info("Debug mode enabled")
-	}
-	if config.DryRun() {
-		logger.Warning("DRY_RUN enabled - using fixture data")
-	}
+	tokenVerifier := boot.AuthVerifier()
+	boot.LogFlags()
 
 	router := handlers.NewRouter(tokenVerifier)
 
@@ -108,7 +72,23 @@ func main() {
 		logger.Error("Server forced to shutdown: %s", err)
 	}
 
-	handlers.WorkerPool.Stop()
+	stopStreams()
+	waitStreams(streamWG)
+	pool.Stop()
 
 	logger.Info("Server stopped")
+}
+
+// waitStreams drains in-flight stream jobs with a timeout.
+func waitStreams(wg *sync.WaitGroup) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		logger.Warning("Stream drain timed out, exiting anyway")
+	}
 }

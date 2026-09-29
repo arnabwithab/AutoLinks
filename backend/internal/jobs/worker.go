@@ -63,21 +63,27 @@ func (wp *WorkerPool) Stop() {
 }
 
 // RunStreamConsumers starts n stream consumers (one per job slot, Level 1) plus
-// a reclaimer that picks up orphans every minute (§7). It returns when ctx ends.
-func (wp *WorkerPool) RunStreamConsumers(ctx context.Context, n int) {
+// a reclaimer that picks up orphans every minute (§7). The returned WaitGroup
+// drains in-flight jobs; callers should wait on it after cancelling ctx.
+func (wp *WorkerPool) RunStreamConsumers(ctx context.Context, n int) *sync.WaitGroup {
+	var wg sync.WaitGroup
 	if err := EnsureStreamGroup(ctx); err != nil {
 		logger.Error("Stream group unavailable, consumers not started: %s", err)
-		return
+		return &wg
 	}
 	id := uuid.New().String()[:8]
 	for i := 0; i < n; i++ {
-		go wp.consumeLoop(ctx, fmt.Sprintf("worker-%s-%d", id, i))
+		wg.Add(1)
+		go wp.consumeLoop(ctx, &wg, fmt.Sprintf("worker-%s-%d", id, i))
 	}
-	go wp.reclaimLoop(ctx, fmt.Sprintf("worker-%s-reclaimer", id))
+	wg.Add(1)
+	go wp.reclaimLoop(ctx, &wg, fmt.Sprintf("worker-%s-reclaimer", id))
 	logger.Info("Stream consumers started (%d slots)", n)
+	return &wg
 }
 
-func (wp *WorkerPool) consumeLoop(ctx context.Context, consumer string) {
+func (wp *WorkerPool) consumeLoop(ctx context.Context, wg *sync.WaitGroup, consumer string) {
+	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -100,7 +106,8 @@ func (wp *WorkerPool) consumeLoop(ctx context.Context, consumer string) {
 	}
 }
 
-func (wp *WorkerPool) reclaimLoop(ctx context.Context, consumer string) {
+func (wp *WorkerPool) reclaimLoop(ctx context.Context, wg *sync.WaitGroup, consumer string) {
+	defer wg.Done()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
