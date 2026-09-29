@@ -2,6 +2,7 @@
 package jobs
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/arnabwithab/AutoLinks/backend/internal/ingest"
 	"github.com/arnabwithab/AutoLinks/backend/internal/logger"
 	"github.com/arnabwithab/AutoLinks/backend/internal/rerank"
+	"github.com/google/uuid"
 )
 
 const (
@@ -58,6 +60,105 @@ func (wp *WorkerPool) Enqueue(job *Job) bool {
 func (wp *WorkerPool) Stop() {
 	close(wp.jobs)
 	wp.wg.Wait()
+}
+
+// RunStreamConsumers starts n stream consumers (one per job slot, Level 1) plus
+// a reclaimer that picks up orphans every minute (§7). It returns when ctx ends.
+func (wp *WorkerPool) RunStreamConsumers(ctx context.Context, n int) {
+	if err := EnsureStreamGroup(ctx); err != nil {
+		logger.Error("Stream group unavailable, consumers not started: %s", err)
+		return
+	}
+	id := uuid.New().String()[:8]
+	for i := 0; i < n; i++ {
+		go wp.consumeLoop(ctx, fmt.Sprintf("worker-%s-%d", id, i))
+	}
+	go wp.reclaimLoop(ctx, fmt.Sprintf("worker-%s-reclaimer", id))
+	logger.Info("Stream consumers started (%d slots)", n)
+}
+
+func (wp *WorkerPool) consumeLoop(ctx context.Context, consumer string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		sm, err := ReadClaim(ctx, consumer, 5*time.Second)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			logger.Error("Stream read failed: %s", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if sm == nil {
+			continue
+		}
+		wp.runStreamMessage(sm)
+	}
+}
+
+func (wp *WorkerPool) reclaimLoop(ctx context.Context, consumer string) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			orphans, err := ReclaimOrphans(ctx, consumer)
+			if err != nil {
+				logger.Error("Reclaim failed: %s", err)
+				continue
+			}
+			for i := range orphans {
+				wp.runStreamMessage(&orphans[i])
+			}
+		}
+	}
+}
+
+// runStreamMessage loads the job, processes it, and ACKs on completion.
+// Unclaimable orphans (fresh lease elsewhere) are left pending for the next cycle.
+func (wp *WorkerPool) runStreamMessage(sm *StreamMessage) {
+	if sm.JobID == "" {
+		_ = AckStream(context.Background(), sm.MsgID)
+		return
+	}
+	job, err := GetJob(sm.JobID)
+	if err != nil || job == nil {
+		logger.Error("Orphan job %s unreadable, acking: %s", sm.JobID, err)
+		_ = AckStream(context.Background(), sm.MsgID)
+		return
+	}
+	switch job.Status {
+	case "done", "failed":
+		_ = AckStream(context.Background(), sm.MsgID)
+		return
+	}
+	// Fresh claim already holds the lease (ReadClaim); reclaimed orphans need CAS.
+	if job.LeaseToken == "" || leaseExpired(job) {
+		if claimed, cErr := compareAndClaim(context.Background(), getRedis(), job.JobID, uuid.New().String()); cErr != nil || !claimed {
+			return // loser or error: leave pending, next cycle retries
+		}
+		if fresh, gErr := GetJob(sm.JobID); gErr == nil && fresh != nil {
+			job = fresh
+		}
+	}
+	logger.Info("Worker processing job %s (trace %s)", job.JobID, sm.TraceID)
+	wp.processJobSafely(job)
+	_ = AckStream(context.Background(), sm.MsgID)
+}
+
+// leaseExpired reports whether a job's lease has passed (or was never set).
+func leaseExpired(job *Job) bool {
+	if job.LeaseExpiresAt == "" {
+		return true
+	}
+	exp, err := time.Parse(time.RFC3339, job.LeaseExpiresAt)
+	return err != nil || !time.Now().UTC().Before(exp)
 }
 
 // ReconcileJobs re-enqueues jobs left in a non-terminal state by a previous
@@ -162,6 +263,19 @@ func (wp *WorkerPool) processJob(job *Job) error { //nolint:gocyclo // job orche
 	if len(urls) == 0 {
 		return fmt.Errorf("no URLs found in sitemap")
 	}
+
+	// Canonicalize + dedupe so each URL is fed exactly once (§2 Fan out).
+	seen := make(map[string]bool, len(urls))
+	deduped := make([]string, 0, len(urls))
+	for _, u := range urls {
+		n := ingest.NormalizeURL(u)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		deduped = append(deduped, n)
+	}
+	urls = deduped
 
 	if uErr := UpdateJob(job.JobID, map[string]interface{}{
 		"articles_total": len(urls),

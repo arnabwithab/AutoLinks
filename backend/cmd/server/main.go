@@ -42,6 +42,16 @@ func main() {
 		logger.Info("Re-enqueued %d pending jobs from Redis", n)
 	}
 
+	// Distributed slow path (§2): stream consumers share work across replicas.
+	// The in-process pool stays for local fallback; the API enqueues to the stream.
+	streamCtx, stopStreams := context.WithCancel(context.Background())
+	defer stopStreams()
+	if err := jobs.EnsureStreamGroup(streamCtx); err != nil {
+		logger.Warning("Stream group unavailable, ingest will 503: %s", err)
+	} else {
+		handlers.WorkerPool.RunStreamConsumers(streamCtx, 4)
+	}
+
 	var tokenVerifier auth.TokenVerifier
 	switch {
 	case config.ClerkSecretKey() != "":

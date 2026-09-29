@@ -42,6 +42,8 @@ const (
 	maxSnippetRunes      = 150
 	maxSitemapConcurrent = 20
 	rateLimitPerMinute   = 120
+	// ponytail: shed-load ceiling; backlog alarm + autoscaling (infra/) keeps depth under this.
+	maxQueueDepth = 200
 )
 
 // WorkerPool is the shared worker pool instance, set by main.go.
@@ -96,26 +98,50 @@ func requestBodyLimiter(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// rateLimitMiddleware is a per-IP fixed-window limiter. It is deliberately
-// in-process: with more than one replica this needs Redis or an upstream limiter.
+// rateLimitMiddleware is a shared fixed-window limiter backed by Redis, so N
+// API tasks share one budget (§3). Falls back to the old in-process limiter
+// when Redis is unconfigured (local dev); fails open on transient errors.
 func rateLimitMiddleware(limit int, window time.Duration) func(http.Handler) http.Handler {
 	var mu sync.Mutex
 	counts := make(map[string]int)
 	reset := time.Now().Add(window)
 
+	fallback := func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		mu.Lock()
+		if time.Now().After(reset) {
+			counts = make(map[string]int)
+			reset = time.Now().Add(window)
+		}
+		ip := clientIP(r)
+		counts[ip]++
+		over := counts[ip] > limit
+		mu.Unlock()
+
+		if over {
+			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			if time.Now().After(reset) {
-				counts = make(map[string]int)
-				reset = time.Now().Add(window)
+			principal := auth.UserIDFromContext(r.Context())
+			key := "ip:" + clientIP(r)
+			if principal != "" {
+				key = "user:" + principal
 			}
-			ip := clientIP(r)
-			counts[ip]++
-			over := counts[ip] > limit
-			mu.Unlock()
-
-			if over {
+			n, err := jobs.RateLimitCount(r.Context(), "autolinks:ratelimit:"+key, window)
+			if err != nil {
+				if errors.Is(err, jobs.ErrNotConfigured) {
+					fallback(w, r, next)
+					return
+				}
+				logger.Warning("Rate limiter Redis error, failing open: %s", err)
+				next.ServeHTTP(w, r)
+				return
+			}
+			if n > int64(limit) {
 				writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
 			}
@@ -394,28 +420,42 @@ func handleIngestSitemap(w http.ResponseWriter, r *http.Request) {
 		req.MaxConcurrent = maxSitemapConcurrent
 	}
 
-	jobID, err := jobs.CreateJob("crawl_sitemap", map[string]interface{}{
+	// Shed load early when the fleet can't drain the backlog (§6).
+	if depth, err := jobs.QueueDepth(r.Context()); err == nil && depth > maxQueueDepth {
+		writeError(w, http.StatusTooManyRequests, "Ingestion queue is full; try again later")
+		return
+	}
+
+	fingerprint := jobs.FingerprintURL(req.SitemapURL)
+	traceID := trace.FromContext(r.Context())
+
+	jobID, created, err := jobs.CreateJobDeduped("crawl_sitemap", map[string]interface{}{
 		"sitemap_url":    req.SitemapURL,
 		"max_concurrent": req.MaxConcurrent,
-	})
+	}, fingerprint, traceID)
 	if err != nil {
 		logger.Error("Failed to create job: %s", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create ingestion job")
 		return
 	}
 
-	job, err := jobs.GetJob(jobID)
-	if err != nil || job == nil {
-		logger.Error("Failed to get created job: %s", err)
-		writeError(w, http.StatusInternalServerError, "Failed to get job")
-		return
+	// Resubmitted sitemap: return the existing job instead of a duplicate crawl.
+	if !created {
+		if job, gErr := jobs.GetJob(jobID); gErr == nil && job != nil {
+			writeJSON(w, http.StatusOK, models.IngestSitemapAsyncResponse{
+				JobID:  jobID,
+				Status: job.Status,
+			})
+			return
+		}
 	}
 
-	if WorkerPool == nil || !WorkerPool.Enqueue(job) {
+	if _, err := jobs.EnqueueStream(r.Context(), jobID, fingerprint, traceID); err != nil {
+		logger.Error("Failed to enqueue job %s: %s", jobID, err)
 		if uErr := jobs.UpdateJob(jobID, map[string]interface{}{"status": "failed"}); uErr != nil {
 			logger.Error("Failed to mark rejected job %s failed: %s", jobID, uErr)
 		}
-		writeError(w, http.StatusServiceUnavailable, "Ingestion queue is full; try again later")
+		writeError(w, http.StatusServiceUnavailable, "Ingestion queue unavailable; try again later")
 		return
 	}
 
@@ -498,26 +538,21 @@ func handleRetryDead(w http.ResponseWriter, r *http.Request) {
 		}
 		entry := entries[0]
 
-		jobID, err := jobs.CreateJob("crawl_sitemap", entry.Args)
+		jobID, _, err := jobs.CreateJobDeduped("crawl_sitemap", entry.Args, "", "")
 		if err != nil {
 			logger.Error("Failed to recreate DLQ job, returning entry to DLQ: %s", err)
 			jobs.PushToDLQ(entry.JobID, entry.Task, entry.Args, entry.Error, entry.RetryCount)
 			break
 		}
 
-		job, err := jobs.GetJob(jobID)
-		if err != nil || job == nil {
-			logger.Error("Failed to get recreated DLQ job: %s", err)
-			continue
-		}
-
-		if WorkerPool != nil && WorkerPool.Enqueue(job) {
-			retriedJobIDs = append(retriedJobIDs, jobID)
-		} else {
+		if _, err := jobs.EnqueueStream(r.Context(), jobID, "", ""); err != nil {
+			logger.Error("Failed to enqueue DLQ job %s: %s", jobID, err)
 			if uErr := jobs.UpdateJob(jobID, map[string]interface{}{"status": "failed"}); uErr != nil {
 				logger.Error("Failed to mark DLQ job %s failed: %s", jobID, uErr)
 			}
+			continue
 		}
+		retriedJobIDs = append(retriedJobIDs, jobID)
 	}
 
 	logger.Info("Re-enqueued %d DLQ jobs", len(retriedJobIDs))

@@ -121,13 +121,15 @@ func QueueDepth(ctx context.Context) (int64, error) {
 	return rds.XLen(ctx, streamKey).Result()
 }
 
-// compareAndClaim sets status=processing + lease only if status is still queued.
+// compareAndClaim sets status=processing + lease only if the job is claimable:
+// queued, or a stale processing/retrying record whose lease has expired (§7).
 // WATCH gives optimistic locking: concurrent racers produce one winner and
 // TxFailedErr losers (mapped to claimed=false, no error).
 func compareAndClaim(ctx context.Context, rds *redis.Client, jobID, lease string) (bool, error) {
 	key := fmt.Sprintf("%s:%s", jobNamespace, jobID)
-	now := time.Now().UTC().Format(time.RFC3339)
-	expires := time.Now().UTC().Add(time.Duration(leaseTTLSeconds) * time.Second).Format(time.RFC3339)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+	expires := now.Add(time.Duration(leaseTTLSeconds) * time.Second).Format(time.RFC3339)
 
 	for attempt := 0; attempt < 3; attempt++ {
 		err := rds.Watch(ctx, func(tx *redis.Tx) error {
@@ -139,13 +141,13 @@ func compareAndClaim(ctx context.Context, rds *redis.Client, jobID, lease string
 			if err := json.Unmarshal([]byte(raw), &job); err != nil {
 				return err
 			}
-			if job.Status != "queued" {
+			if !claimable(job, now) {
 				return ErrNotQueued
 			}
 			job.Status = "processing"
 			job.LeaseToken = lease
 			job.LeaseExpiresAt = expires
-			job.UpdatedAt = now
+			job.UpdatedAt = nowStr
 			data, err := json.Marshal(job)
 			if err != nil {
 				return err
@@ -180,17 +182,39 @@ func toString(v interface{}) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// ReclaimOrphans re-queues stream messages idle past the lease TTL (§7 worker dies).
-// It returns the number of messages reclaimed for redelivery.
-func ReclaimOrphans(ctx context.Context, consumer string) (int, error) {
+// claimable reports whether a job record may be claimed now: queued, or a
+// stale processing/retrying record whose lease has expired (§7). Records
+// without a lease (pre-distribution jobs) count as expired.
+func claimable(job Job, now time.Time) bool {
+	switch job.Status {
+	case "queued":
+		return true
+	case "processing", "retrying":
+		if job.LeaseExpiresAt == "" {
+			return true
+		}
+		if exp, err := time.Parse(time.RFC3339, job.LeaseExpiresAt); err != nil || !now.Before(exp) {
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// ReclaimOrphans transfers stream messages idle past the lease TTL to consumer
+// (§7 worker dies) and returns them for CAS-claim + re-run. Unclaimable
+// entries (fresh lease, original worker alive) are left pending: the owner's
+// finish ACK clears them, otherwise the next cycle retries.
+func ReclaimOrphans(ctx context.Context, consumer string) ([]StreamMessage, error) {
 	rds := getRedis()
 	if rds == nil {
-		return 0, ErrNotConfigured
+		return nil, ErrNotConfigured
 	}
-	var start string = "0-0"
-	reclaimed := 0
+	var out []StreamMessage
+	start := "0-0"
 	for {
-		res, next, err := rds.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		msgs, next, err := rds.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream:   streamKey,
 			Group:    streamGroup,
 			Consumer: consumer,
@@ -199,15 +223,23 @@ func ReclaimOrphans(ctx context.Context, consumer string) (int, error) {
 			Count:    50,
 		}).Result()
 		if err != nil {
-			return reclaimed, fmt.Errorf("autoclaim failed: %w", err)
+			return out, fmt.Errorf("autoclaim failed: %w", err)
 		}
-		reclaimed += len(res)
-		if next == "0-0" || len(res) == 0 {
+		for _, m := range msgs {
+			out = append(out, StreamMessage{
+				MsgID:       m.ID,
+				JobID:       toString(m.Values["job_id"]),
+				Fingerprint: toString(m.Values["fingerprint"]),
+				TraceID:     toString(m.Values["trace_id"]),
+			})
+		}
+		if next == "0-0" || len(msgs) == 0 {
 			break
 		}
 		start = next
-		logger.Info("Reclaimed %d orphan stream messages", reclaimed)
-		return reclaimed, nil
 	}
-	return reclaimed, nil
+	if len(out) > 0 {
+		logger.Info("Reclaimed %d orphan stream messages", len(out))
+	}
+	return out, nil
 }
