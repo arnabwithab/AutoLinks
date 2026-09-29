@@ -49,7 +49,7 @@ qdrant_storage/
 # AI Harness
 .codex
 superpowers/
-.superpowerssandbox/
+.superpowers
 
 # Go
 backend/server
